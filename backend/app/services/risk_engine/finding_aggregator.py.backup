@@ -1,0 +1,217 @@
+﻿"""Aggregates defensive security findings from open ports, device attributes, and anomaly telemetry."""
+
+import uuid
+from typing import Any, Dict, List, Optional
+from app.models.enums import FindingStatus, Severity
+from app.services.risk_engine.models import (
+    AnomalyResult,
+    BaselineStatus,
+    EvaluatedFinding,
+    FindingCategory,
+    FindingEvidence,
+)
+
+
+class FindingAggregator:
+    """Combines discovered services, anomalies, and configuration evaluations into substantiated findings."""
+
+    @staticmethod
+    def generate_findings_from_ports(device_id: uuid.UUID, open_ports: List[Any]) -> List[EvaluatedFinding]:
+        """Generate substantiated security posture findings from observed open ports."""
+        findings: List[EvaluatedFinding] = []
+
+        port_numbers = []
+        for p in open_ports:
+            if isinstance(p, int):
+                port_numbers.append(p)
+            elif hasattr(p, "port_number"):
+                port_numbers.append(p.port_number)
+            elif isinstance(p, dict) and "port_number" in p:
+                port_numbers.append(p["port_number"])
+
+        unique_ports = sorted(list(set(port_numbers)))
+
+        for port in unique_ports:
+            # 1. Port 445 (SMB)
+            if port == 445:
+                evidence = FindingEvidence(
+                    source="open_port",
+                    port=445,
+                    protocol="TCP",
+                    reason="SMB file sharing service active on local subnet",
+                    raw_data="TCP 445 OPEN",
+                )
+                findings.append(
+                    EvaluatedFinding(
+                        device_id=device_id,
+                        title="SMB File Sharing Service Exposed",
+                        category=FindingCategory.EXPOSURE.value,
+                        severity=Severity.HIGH,
+                        status=FindingStatus.OPEN,
+                        description=(
+                            "Server Message Block (SMB) service is accessible on TCP port 445. "
+                            "Unrestricted SMB exposure on local subnets presents a risk of unauthorized "
+                            "file access and lateral movement."
+                        ),
+                        evidence=evidence.model_dump(mode="json"),
+                        remediation_steps=(
+                            "1. Disable SMBv1 and enable SMB signing.\n"
+                            "2. Restrict SMB access to authorized IP subnets.\n"
+                            "3. Ensure strong authentication on all shared folders."
+                        ),
+                    )
+                )
+
+            # 2. Port 80 (HTTP)
+            elif port == 80:
+                evidence = FindingEvidence(
+                    source="open_port",
+                    port=80,
+                    protocol="TCP",
+                    reason="Unencrypted HTTP web management interface observed",
+                    raw_data="TCP 80 OPEN",
+                )
+                findings.append(
+                    EvaluatedFinding(
+                        device_id=device_id,
+                        title="Unencrypted HTTP Management Interface Exposed",
+                        category=FindingCategory.EXPOSURE.value,
+                        severity=Severity.MEDIUM,
+                        status=FindingStatus.OPEN,
+                        description=(
+                            "An unencrypted HTTP web server is active on TCP port 80. Credentials and "
+                            "session cookies transmitted over plaintext HTTP can be intercepted on the local network."
+                        ),
+                        evidence=evidence.model_dump(mode="json"),
+                        remediation_steps=(
+                            "1. Redirect all HTTP traffic to HTTPS (port 443).\n"
+                            "2. Enable TLS/SSL certificates for the management console.\n"
+                            "3. Disable plain HTTP administration if HTTPS is available."
+                        ),
+                    )
+                )
+
+            # 3. Port 554 (RTSP)
+            elif port == 554:
+                evidence = FindingEvidence(
+                    source="open_port",
+                    port=554,
+                    protocol="TCP",
+                    reason="RTSP unencrypted media streaming port active",
+                    raw_data="TCP 554 OPEN",
+                )
+                findings.append(
+                    EvaluatedFinding(
+                        device_id=device_id,
+                        title="Unencrypted RTSP Video Stream Exposed",
+                        category=FindingCategory.EXPOSURE.value,
+                        severity=Severity.MEDIUM,
+                        status=FindingStatus.OPEN,
+                        description=(
+                            "Real Time Streaming Protocol (RTSP) is active on port 554. "
+                            "If default or missing credentials are used, video feeds may be accessible to any local device."
+                        ),
+                        evidence=evidence.model_dump(mode="json"),
+                        remediation_steps=(
+                            "1. Enforce strong RTSP digest authentication.\n"
+                            "2. Place IP cameras on an isolated IoT VLAN.\n"
+                            "3. Use RTSPS (TLS-encrypted RTSP) if supported by the camera firmware."
+                        ),
+                    )
+                )
+
+            # 4. Port 22 (SSH)
+            elif port == 22:
+                evidence = FindingEvidence(
+                    source="open_port",
+                    port=22,
+                    protocol="TCP",
+                    reason="SSH remote management service active",
+                    raw_data="TCP 22 OPEN",
+                )
+                findings.append(
+                    EvaluatedFinding(
+                        device_id=device_id,
+                        title="SSH Remote Administrative Interface Active",
+                        category=FindingCategory.SERVICE.value,
+                        severity=Severity.LOW,
+                        status=FindingStatus.OPEN,
+                        description=(
+                            "SSH remote management console is listening on port 22. "
+                            "While encrypted, SSH interfaces should enforce public-key authentication and disable root login."
+                        ),
+                        evidence=evidence.model_dump(mode="json"),
+                        remediation_steps=(
+                            "1. Disable password authentication in favor of ED25519 SSH keys.\n"
+                            "2. Set 'PermitRootLogin no' in sshd_config.\n"
+                            "3. Restrict SSH access to trusted management IP addresses."
+                        ),
+                    )
+                )
+
+            # 5. Port 8080 (HTTP-alt)
+            elif port == 8080:
+                evidence = FindingEvidence(
+                    source="open_port",
+                    port=8080,
+                    protocol="TCP",
+                    reason="HTTP alternate unencrypted port active",
+                    raw_data="TCP 8080 OPEN",
+                )
+                findings.append(
+                    EvaluatedFinding(
+                        device_id=device_id,
+                        title="Unencrypted Secondary Web Service (Port 8080)",
+                        category=FindingCategory.EXPOSURE.value,
+                        severity=Severity.MEDIUM,
+                        status=FindingStatus.OPEN,
+                        description=(
+                            "A secondary unencrypted web interface was discovered on port 8080. "
+                            "Secondary web consoles frequently host administrative or debugging endpoints."
+                        ),
+                        evidence=evidence.model_dump(mode="json"),
+                        remediation_steps=(
+                            "1. Verify if the port 8080 service requires public LAN exposure.\n"
+                            "2. Enforce authentication and migrate to TLS port 8443."
+                        ),
+                    )
+                )
+
+        return findings
+
+    @staticmethod
+    def generate_findings_from_anomalies(device_id: uuid.UUID, anomaly_result: AnomalyResult) -> List[EvaluatedFinding]:
+        """Generate findings for high-risk or severe anomaly detections."""
+        findings: List[EvaluatedFinding] = []
+
+        if anomaly_result.status in (BaselineStatus.ANOMALOUS, BaselineStatus.SEVERE_ANOMALY):
+            severity = Severity.CRITICAL if anomaly_result.status == BaselineStatus.SEVERE_ANOMALY else Severity.HIGH
+            evidence = FindingEvidence(
+                source="anomaly_detector",
+                reason=f"Telemetry anomaly detected with score {anomaly_result.anomaly_score}/100",
+                raw_data=f"Status: {anomaly_result.status.value}, Anomaly Count: {len(anomaly_result.anomalies_detected)}",
+            )
+            reasons_summary = "\n".join([f"- {a.get('reason', 'Anomaly event')}" for a in anomaly_result.anomalies_detected])
+
+            findings.append(
+                EvaluatedFinding(
+                    device_id=device_id,
+                    title=f"Network Telemetry Anomaly Detected ({anomaly_result.status.value.upper()})",
+                    category=FindingCategory.ANOMALY.value,
+                    severity=severity,
+                    status=FindingStatus.OPEN,
+                    description=(
+                        f"Deterministic baseline telemetry analysis flagged anomalous behavior on this device.\n"
+                        f"Identified indicators:\n{reasons_summary}"
+                    ),
+                    evidence=evidence.model_dump(mode="json"),
+                    remediation_steps=(
+                        "1. Inspect active processes and outbound network connections on the device.\n"
+                        "2. Check for unauthorized background services or compromised firmware.\n"
+                        "3. Temporarily isolate the device from sensitive network segments if behavior persists."
+                    ),
+                )
+            )
+
+        return findings
+

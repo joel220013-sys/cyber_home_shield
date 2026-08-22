@@ -1,0 +1,6 @@
+{
+  "name": "Cyber Home Shield",
+  "description": "Ethical home-network cybersecurity platform for device discovery, security profiling, anomaly detection, risk scoring, and defensive mitigation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
