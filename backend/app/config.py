@@ -3,8 +3,13 @@
 import json
 from typing import List, Union
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+DEFAULT_DEVELOPMENT_SECRET = (
+    "cyber-home-shield-development-secret-key-change-this"
+)
 
 
 class Settings(BaseSettings):
@@ -52,13 +57,38 @@ class Settings(BaseSettings):
     # AUTHENTICATION & SESSION SECURITY
     # =========================================================================
 
-    SECRET_KEY: str = (
-        "cyber-home-shield-development-secret-key-change-this"
-    )
+    SECRET_KEY: str = DEFAULT_DEVELOPMENT_SECRET
 
     JWT_ALGORITHM: str = "HS256"
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+
+    @model_validator(mode="after")
+    def validate_production_secret(self) -> "Settings":
+        """Reject missing, default, or weak JWT secrets in production."""
+        if self.is_production():
+            if (
+                not self.SECRET_KEY
+                or self.SECRET_KEY == DEFAULT_DEVELOPMENT_SECRET
+                or len(self.SECRET_KEY) < 32
+            ):
+                raise ValueError(
+                    "SECRET_KEY must be a unique value of at least 32 characters "
+                    "when ENVIRONMENT is production."
+                )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_production_runtime(self) -> "Settings":
+        """Reject unsafe debug and wildcard CORS production settings."""
+        if self.is_production():
+            if self.DEBUG:
+                raise ValueError("DEBUG must be false when ENVIRONMENT is production.")
+            if "*" in self.CORS_ORIGINS:
+                raise ValueError("CORS_ORIGINS must not contain '*' in production.")
+
+        return self
 
     # =========================================================================
     # RATE LIMITING & TELEMETRY

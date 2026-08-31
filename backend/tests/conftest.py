@@ -20,6 +20,8 @@ from app.config import Settings
 from app.core.security import rate_limiter
 from app.db.base import Base
 from app.db.session import get_db
+from app.services.ai.nemotron_client import NemotronClient
+from app.services.ai.service import ai_service
 
 # Create in-memory SQLite async engine for tests
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
@@ -55,6 +57,17 @@ async def reset_rate_limiter_state():
     rate_limiter.reset()
     yield
     rate_limiter.reset()
+
+
+@pytest.fixture(autouse=True)
+def disable_external_ai_calls():
+    """Force API tests to use deterministic AI fallbacks without network calls."""
+    original_advisor = ai_service.advisor
+    fallback_advisor = NemotronClient()
+    fallback_advisor.api_key = ""
+    ai_service.advisor = fallback_advisor
+    yield
+    ai_service.advisor = original_advisor
 
 
 @pytest_asyncio.fixture

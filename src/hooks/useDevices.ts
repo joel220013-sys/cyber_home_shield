@@ -25,6 +25,18 @@ export function useDevices() {
     }
   }, []);
 
+  const discoverInventory = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setDevices(await deviceService.discoverInventory());
+    } catch (err: any) {
+      setError(err.message || 'Failed to refresh device inventory');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDevices();
   }, [fetchDevices]);
@@ -74,5 +86,6 @@ export function useDevices() {
     sortOrder,
     setSortOrder,
     refresh: fetchDevices,
+    discoverInventory,
   };
 }

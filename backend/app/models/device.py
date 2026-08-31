@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    JSON,
     String,
     Uuid,
 )
@@ -97,6 +98,11 @@ class Device(Base, TimestampMixin):
         default="Unknown Vendor",
         nullable=False,
     )
+
+    vendor_source: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    device_role: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    identity_confidence: Mapped[str] = mapped_column(String(20), default="LOW", nullable=False)
+    identity_evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     device_type: Mapped[DeviceType] = mapped_column(
         Enum(

@@ -59,6 +59,7 @@ class MockFinding:
         self.description = f"Description for {title}"
         self.remediation_steps = "Follow standard remediation."
         self.cve_id = ""
+        self.status = FindingStatus.OPEN
 
 
 # ==============================================================================

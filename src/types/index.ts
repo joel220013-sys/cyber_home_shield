@@ -146,6 +146,10 @@ export interface Device {
   mac_address?: string | null;
   hostname?: string | null;
   vendor?: string | null;
+  vendor_source?: string;
+  device_role?: string;
+  identity_confidence?: string;
+  identity_evidence?: Record<string, Array<{ method?: string; source?: string; raw_response?: string; detail?: string }>>;
   device_type: DeviceType;
   os_fingerprint?: string | null;
   is_online: boolean;
@@ -295,6 +299,51 @@ export interface AIChatResponse {
   evidence_citations?: string[];
   defensive_priorities?: string[];
   confidence?: number;
+}
+
+export interface RouterDetectionResponse {
+  status: 'detected' | 'unavailable';
+  gateway_ip: string | null;
+  local_ip: string | null;
+  network_cidr: string | null;
+  interface: string | null;
+  connection_type: string | null;
+}
+
+export interface RouterHealthResponse {
+  status: 'reachable' | 'unavailable';
+  gateway_ip: string | null;
+  latency_ms: number | null;
+  checked_at: string;
+  method: string | null;
+}
+
+export interface DiscoveredNetworkDevice {
+  ip: string;
+  mac: string | null;
+  hostname: string | null;
+  vendor: string | null;
+  status: string;
+  mac_type: 'globally_administered' | 'locally_administered' | 'unknown';
+  classification: 'KNOWN' | 'UNIDENTIFIED' | 'SUSPICIOUS';
+  identity_classification: 'KNOWN' | 'UNIDENTIFIED' | 'SUSPICIOUS';
+  evidence_state: string;
+  reason: string;
+  risk_level: string;
+  risk_score: number;
+  confidence: string;
+  device_role: string;
+  posture_evidence: Array<{
+    category: 'hostname' | 'vendor' | 'role' | 'reachability' | 'security' | 'identity';
+    source: string;
+    detail: string;
+  }>;
+}
+
+export interface NetworkDiscoveryResponse {
+  status: 'completed' | 'unavailable';
+  network: string | null;
+  devices: DiscoveredNetworkDevice[];
 }
 
 export interface DeviceRiskExplanation {

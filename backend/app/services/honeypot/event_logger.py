@@ -201,12 +201,9 @@ async def log_honeypot_event(
     Persist sanitized honeypot telemetry and generate a
     SecurityFinding when a deterministic anomaly is detected.
 
-    Device association is resolved using source IP.
-
-    The authenticated user is retained on HoneypotEvent.user_id,
-    but is NOT used to restrict Device lookup because honeypot
-    traffic represents network telemetry originating from the
-    source IP.
+    Device association is resolved using source IP within the
+    event owner's tenant. Unowned telemetry can only correlate
+    with an unowned device.
     """
 
     # ---------------------------------------------------------
@@ -277,16 +274,9 @@ async def log_honeypot_event(
 
     if anomaly:
 
-        # Resolve originating device by source IP.
-        #
-        # IMPORTANT:
-        # Do NOT restrict this lookup using telemetry.user_id.
-        #
-        # The authenticated API user and the network source device
-        # are separate security identities.
-
         dev_stmt = select(Device).where(
-            Device.ip_address == telemetry.source_ip
+            Device.ip_address == telemetry.source_ip,
+            Device.user_id == telemetry.user_id,
         )
 
         dev_res = await db.execute(dev_stmt)

@@ -2,7 +2,8 @@
 
 import uuid
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,7 @@ from app.config import settings
 from app.core.security import (
     create_access_token,
     get_password_hash,
+    revoke_access_token,
     verify_password,
 )
 from app.models.user import User
@@ -27,6 +29,7 @@ from app.schemas.user import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+_auth_scheme = HTTPBearer(auto_error=True)
 
 
 @router.post(
@@ -140,8 +143,12 @@ async def login(
     status_code=status.HTTP_200_OK,
     summary="Log out and invalidate client session",
 )
-async def logout() -> dict:
-    """Acknowledge logout on client-side session."""
+async def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(_auth_scheme),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Revoke the presented access token for the remainder of its lifetime."""
+    revoke_access_token(credentials.credentials)
     return {"message": "Successfully logged out."}
 
 

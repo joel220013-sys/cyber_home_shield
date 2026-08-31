@@ -39,37 +39,154 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
         ip_str: str,
         ports: List[int],
         arp_table: dict,
+        reachability_method: str = "",
+        deadline: Optional[float] = None,
     ) -> Optional[DiscoveredHost]:
         """Audit a single host for reachability and configured open ports."""
 
         now = datetime.now(timezone.utc)
         mac = arp_table.get(ip_str, "")
 
-        open_services = await self.port_profiler.scan_host_ports(
-            ip_str,
-            ports,
+        remaining = (
+            max(deadline - asyncio.get_running_loop().time(), 0.0)
+            if deadline is not None
+            else settings.CONNECT_TIMEOUT
         )
+        if remaining <= 0:
+            return None
 
-        # A host is considered active when:
-        # 1. At least one configured TCP service is open, or
-        # 2. The host exists in the local ARP/neighbour table.
-        if open_services or mac:
-            hostname = await self.host_discoverer.resolve_hostname(
-                ip_str
+        try:
+            open_services = await asyncio.wait_for(
+                self.port_profiler.scan_host_ports(ip_str, ports),
+                timeout=remaining,
             )
+        except asyncio.TimeoutError:
+            return None
+
+        # ARP is only a candidate source. Current reachability must come from
+        # this scan's ICMP probe or a successful TCP connection.
+        if open_services or reachability_method:
+            try:
+                hostname_timeout = min(
+                    max(deadline - asyncio.get_running_loop().time(), 0.0)
+                    if deadline is not None
+                    else settings.CONNECT_TIMEOUT,
+                    2.0,
+                )
+                hostname, hostname_evidence = await asyncio.wait_for(
+                    self._resolve_hostname(ip_str),
+                    timeout=hostname_timeout,
+                )
+            except asyncio.TimeoutError:
+                hostname = ""
+                hostname_evidence = []
+            vendor = SafeHostDiscoverer.mac_vendor_label(mac)
+            vendor_evidence: list[DiscoveryEvidence] = []
+            if vendor:
+                vendor_evidence.append(DiscoveryEvidence(
+                    method="mac_local_administered_bit",
+                    timestamp=now,
+                    raw_response="MAC has the locally administered bit set; no OUI vendor was assigned.",
+                ))
+                # A privacy label is evidence, not a manufacturer identity.
+                vendor = ""
+            else:
+                vendor_timeout = min(
+                    max(deadline - asyncio.get_running_loop().time(), 0.0)
+                    if deadline is not None
+                    else settings.CONNECT_TIMEOUT,
+                    0.75,
+                )
+                try:
+                    vendor = await asyncio.wait_for(
+                        self.host_discoverer.lookup_mac_vendor(mac),
+                        timeout=vendor_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    vendor = ""
+                if vendor:
+                    vendor_evidence.append(DiscoveryEvidence(
+                        method="ieee_oui_lookup",
+                        timestamp=now,
+                        raw_response=f"IEEE OUI registry matched {vendor}.",
+                    ))
+                elif mac:
+                    vendor_evidence.append(DiscoveryEvidence(
+                        method="ieee_oui_lookup",
+                        timestamp=now,
+                        raw_response="IEEE OUI lookup returned no manufacturer for the observed MAC.",
+                    ))
+            reachability_evidence = []
+            if mac:
+                reachability_evidence.append(DiscoveryEvidence(
+                    method="local_arp_neighbor_table",
+                    timestamp=now,
+                    raw_response="IP/MAC mapping observed in the local neighbor table.",
+                ))
+            if open_services:
+                reachability_evidence.append(DiscoveryEvidence(
+                    method="bounded_tcp_connect",
+                    timestamp=now,
+                    raw_response="At least one configured TCP service accepted a connection.",
+                ))
+            if reachability_method and reachability_method != "local_arp_neighbor_table":
+                reachability_evidence.append(DiscoveryEvidence(
+                    method=reachability_method,
+                    timestamp=now,
+                    raw_response="Bounded local reachability probe received a response.",
+                ))
 
             return DiscoveredHost(
                 ip_address=ip_str,
                 mac_address=mac,
                 hostname=hostname,
+                vendor=vendor,
+                hostname_evidence=hostname_evidence,
+                vendor_evidence=vendor_evidence,
+                reachability_evidence=reachability_evidence,
                 is_online=True,
                 services=open_services,
                 first_seen=now,
                 last_seen=now,
-                discovery_method="defensive_tcp_arp",
+                discovery_method=reachability_method or "defensive_tcp_arp",
             )
 
         return None
+
+    async def _resolve_hostname(self, ip_address: str) -> tuple[str, list[DiscoveryEvidence]]:
+        """Try local identity sources in order without fabricating names."""
+
+        checked: list[DiscoveryEvidence] = []
+        for resolver_name, method in (
+            ("resolve_hostname", "reverse_dns"),
+            ("resolve_local_hostname", "windows_name_service"),
+            ("resolve_mdns_hostname", "mdns_or_dns_sd"),
+            ("resolve_netbios_hostname", "windows_nbtstat"),
+            ("resolve_windows_llmnr_hostname", "windows_llmnr"),
+            ("resolve_windows_ping_hostname", "windows_ping_a"),
+        ):
+            resolver = getattr(self.host_discoverer, resolver_name, None)
+            if resolver is None:
+                continue
+            try:
+                hostname = await resolver(ip_address)
+            except Exception:
+                checked.append(DiscoveryEvidence(
+                    method=method,
+                    raw_response=f"{method} could not resolve a hostname for {ip_address}.",
+                ))
+                continue
+            if hostname:
+                return hostname, checked + [DiscoveryEvidence(
+                    method=method,
+                    raw_response=f"Resolved hostname {hostname} for {ip_address}.",
+                )]
+            checked.append(DiscoveryEvidence(
+                method=method,
+                raw_response=f"{method} returned no hostname for {ip_address}.",
+            ))
+
+        return "", checked
 
     async def discover(
         self,
@@ -87,7 +204,26 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
         # Read local ARP/neighbour table
         # ------------------------------------------------------------------
 
-        arp_table = self.host_discoverer.read_local_arp_table()
+        arp_table = {
+            ip_str: normalized_mac
+            for ip_str, mac in self.host_discoverer.read_local_arp_table().items()
+            if (
+                (normalized_mac := SafeHostDiscoverer._normalize_mac(mac))
+            )
+        }
+        read_neighbors = getattr(
+            self.host_discoverer,
+            "read_current_windows_neighbors",
+            None,
+        )
+        current_neighbors = read_neighbors() if read_neighbors else {}
+        for ip_str, mac in current_neighbors.items():
+            normalized_mac = SafeHostDiscoverer._normalize_mac(mac)
+            if normalized_mac:
+                arp_table.setdefault(ip_str, normalized_mac)
+        local_ips = self.host_discoverer.get_local_ipv4_addresses()
+        if target.local_ip:
+            local_ips.add(target.local_ip.strip())
 
         logger.debug(
             "Read %d private hosts from local ARP table.",
@@ -107,12 +243,38 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
                     strict=False,
                 )
 
-                candidate_ips = [
+                subnet_hosts = [
                     str(ip)
-                    for ip in list(network.hosts())[: target.max_hosts]
+                    for ip in network.hosts()
                 ]
             else:
-                candidate_ips = [target_str]
+                network = ipaddress.ip_network(
+                    f"{target_str}/32",
+                    strict=False,
+                )
+                subnet_hosts = [target_str]
+
+            # ARP is passive evidence and is prioritized, but it must not
+            # suppress active probing of the other authorized local hosts.
+            scoped_arp_hosts = [
+                ip_str
+                for ip_str in arp_table
+                if self._is_valid_target_ip(ip_str, network, local_ips)
+            ]
+            scoped_current_neighbors = [
+                ip_str
+                for ip_str in current_neighbors
+                if self._is_valid_target_ip(ip_str, network, local_ips)
+            ]
+            scoped_subnet_hosts = [
+                ip_str
+                for ip_str in subnet_hosts
+                if self._is_valid_target_ip(ip_str, network, local_ips)
+            ]
+            candidate_ips = list(dict.fromkeys(
+                scoped_arp_hosts
+                + [ip_str for ip_str in scoped_subnet_hosts if ip_str not in scoped_arp_hosts]
+            ))[: target.max_hosts]
 
         except ValueError as exc:
             errors.append(
@@ -145,19 +307,90 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
         # Bounded host concurrency
         # ------------------------------------------------------------------
 
-        semaphore = asyncio.Semaphore(
-            settings.MAX_CONCURRENT_CHECKS
-        )
+        semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_CHECKS)
+        deadline = asyncio.get_running_loop().time() + target.timeout_seconds
+
+        probe_results: dict[str, Optional[bool]] = {}
+        probe_candidates = [
+            ip for ip in candidate_ips if ip not in scoped_current_neighbors
+        ]
+
+        async def bounded_probe(ip: str) -> tuple[str, Optional[bool]]:
+            async with semaphore:
+                try:
+                    probe = getattr(self.host_discoverer, "probe_host", None)
+                    if probe is None:
+                        return ip, None
+                    return ip, await probe(
+                        ip,
+                        timeout_seconds=min(settings.CONNECT_TIMEOUT, 0.5),
+                    )
+                except Exception as exc:
+                    logger.debug("Error probing host %s: %s", ip, exc)
+                    return ip, None
+
+        if probe_candidates:
+            probe_tasks = [asyncio.create_task(bounded_probe(ip)) for ip in probe_candidates]
+            try:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                probe_pairs = await asyncio.wait_for(
+                    asyncio.gather(*probe_tasks),
+                    timeout=remaining,
+                )
+                probe_results = dict(probe_pairs)
+            except asyncio.TimeoutError:
+                for task in probe_tasks:
+                    task.cancel()
+                await asyncio.gather(*probe_tasks, return_exceptions=True)
+                errors.append(
+                    f"Discovery exceeded the {target.timeout_seconds:.1f}-second timeout."
+                )
+                probe_results = {ip: False for ip in probe_candidates}
+
+        # A successful active probe can populate the ARP cache. Refresh once
+        # after probing so the returned identity can include that MAC.
+        if any(value is True for value in probe_results.values()):
+            refreshed_arp = self.host_discoverer.read_local_arp_table()
+            for ip_str, mac in refreshed_arp.items():
+                if self._is_valid_target_ip(ip_str, network, local_ips):
+                    normalized_mac = SafeHostDiscoverer._normalize_mac(mac)
+                    if normalized_mac:
+                        arp_table[ip_str] = normalized_mac
+
+        # Every candidate must have fresh evidence. If ICMP is unavailable,
+        # retain candidates for the existing bounded TCP fallback; a failed
+        # ICMP probe is never converted into reachability by stale ARP.
+        audit_candidates = [
+            (
+                ip,
+                "windows_neighbor_reachable"
+                if ip in scoped_current_neighbors
+                else "active_icmp_probe"
+                if probe_results.get(ip) is True
+                else "",
+            )
+            for ip in candidate_ips
+            if (
+                ip in scoped_current_neighbors
+                or probe_results.get(ip) is True
+                or probe_results.get(ip) is None
+            )
+        ]
 
         async def bounded_audit(
-            ip: str,
+            item: tuple[str, str],
         ) -> Optional[DiscoveredHost]:
+            ip, reachability_method = item
             async with semaphore:
                 try:
                     return await self._audit_host(
                         ip,
                         target.ports,
                         arp_table,
+                        reachability_method,
+                        deadline,
                     )
 
                 except Exception as exc:
@@ -169,14 +402,30 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
                     return None
 
         tasks = [
-            bounded_audit(ip)
-            for ip in candidate_ips
+            asyncio.create_task(bounded_audit(item))
+            for item in audit_candidates
         ]
 
-        results = await asyncio.gather(
-            *tasks,
-            return_exceptions=False,
-        )
+        try:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=False),
+                timeout=remaining,
+            )
+        except asyncio.TimeoutError:
+            for task in tasks:
+                task.cancel()
+
+            await asyncio.gather(
+                *tasks,
+                return_exceptions=True,
+            )
+            errors.append(
+                f"Discovery exceeded the {target.timeout_seconds:.1f}-second timeout."
+            )
+            results = []
 
         # ------------------------------------------------------------------
         # Collect discovered hosts and services
@@ -208,7 +457,11 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
                     method="defensive_network_discovery",
                     timestamp=end_time,
                     raw_response=(
-                        f"Audited {len(candidate_ips)} candidates "
+                        f"Prioritized {len(scoped_arp_hosts)} ARP candidates and "
+                        f"recognized {len(scoped_current_neighbors)} active Windows "
+                        "neighbor observations; "
+                        f"actively probed {len(probe_candidates)} additional "
+                        f"authorized candidates; audited {len(audit_candidates)} "
                         f"on {target.target_subnet}."
                     ),
                     response_time_ms=round(
@@ -222,7 +475,7 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
                 hosts_checked=len(candidate_ips),
                 hosts_found=len(discovered_hosts),
                 services_checked=(
-                    len(candidate_ips)
+                    len(audit_candidates)
                     * len(target.ports)
                 ),
                 services_found=len(all_services),
@@ -231,6 +484,35 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
                     3,
                 ),
             ),
+        )
+
+    @staticmethod
+    def _is_valid_target_ip(
+        ip_str: str,
+        network: ipaddress.IPv4Network,
+        local_ips: set[str] | None = None,
+    ) -> bool:
+        """Return whether an ARP key is a valid host inside the target."""
+
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+
+        return (
+            isinstance(ip, ipaddress.IPv4Address)
+            and ip in network
+            and (
+                network.prefixlen == 32
+                or (
+                    ip != network.network_address
+                    and ip != network.broadcast_address
+                )
+            )
+            and ip.is_private
+            and not ip.is_loopback
+            and not ip.is_multicast
+            and str(ip) not in (local_ips or set())
         )
 
     async def dry_run(

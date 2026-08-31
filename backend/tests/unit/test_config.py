@@ -6,7 +6,7 @@ from app.config import Settings
 
 def test_default_config_loading():
     """Verify standard default configuration values."""
-    cfg = Settings()
+    cfg = Settings(_env_file=None)
     assert cfg.APP_NAME == "Cyber Home Shield"
     assert cfg.APP_VERSION == "0.1.0"
     assert cfg.API_V1_PREFIX == "/api/v1"
@@ -39,4 +39,46 @@ def test_secret_masking_in_repr():
     repr_str = repr(cfg)
     assert "nvapi-super-secret-key-12345" not in repr_str
     assert "***" in repr_str
+
+
+def test_production_rejects_missing_or_default_secret():
+    """Production settings must not use the development JWT secret."""
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        Settings(ENVIRONMENT="production", SECRET_KEY="")
+
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        Settings(
+            ENVIRONMENT="production",
+            SECRET_KEY="cyber-home-shield-development-secret-key-change-this",
+        )
+
+
+def test_production_accepts_configured_secret():
+    """A sufficiently long configured production secret is accepted."""
+    cfg = Settings(
+        ENVIRONMENT="production",
+        DEBUG=False,
+        CORS_ORIGINS=["https://shield.example"],
+        SECRET_KEY="secure-production-secret-" * 2,
+    )
+    assert len(cfg.SECRET_KEY) >= 32
+
+
+def test_production_rejects_debug_and_wildcard_cors():
+    """Production settings must not enable debug or unrestricted CORS."""
+    with pytest.raises(ValueError, match="DEBUG"):
+        Settings(
+            ENVIRONMENT="production",
+            DEBUG=True,
+            CORS_ORIGINS=["https://shield.example"],
+            SECRET_KEY="secure-production-secret-" * 2,
+        )
+
+    with pytest.raises(ValueError, match="CORS_ORIGINS"):
+        Settings(
+            ENVIRONMENT="production",
+            DEBUG=False,
+            CORS_ORIGINS=["*"],
+            SECRET_KEY="secure-production-secret-" * 2,
+        )
 

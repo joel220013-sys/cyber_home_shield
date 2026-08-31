@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     get_db,
-    get_optional_current_user,
+    get_current_user,
     rate_limit_honeypot,
 )
 from app.core.exceptions import ScopeValidationError
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/honeypot", tags=["Honeypot & Deception"])
     dependencies=[Depends(rate_limit_honeypot)],
 )
 async def get_honeypot_status(
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> HoneypotStatusResponse:
     """
@@ -82,7 +82,7 @@ async def get_honeypot_status(
 )
 async def start_honeypot(
     request: Optional[HoneypotStartRequest] = None,
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> HoneypotStartResponse:
     """
     Start defensive honeypot trap listeners. Enforces localhost isolation by default.
@@ -117,7 +117,7 @@ async def start_honeypot(
     dependencies=[Depends(rate_limit_honeypot)],
 )
 async def stop_honeypot(
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> HoneypotStopResponse:
     """
     Stop honeypot listeners and release network resources safely.
@@ -148,7 +148,7 @@ async def list_honeypot_events(
     interaction_type: Optional[str] = Query(None, description="Filter by interaction archetype"),
     limit: int = Query(50, ge=1, le=200, description="Max records to return"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> List[HoneypotEventResponse]:
     """
@@ -156,7 +156,7 @@ async def list_honeypot_events(
     """
     query = select(HoneypotEvent).order_by(HoneypotEvent.event_timestamp.desc())
 
-    if current_user and not current_user.is_superuser:
+    if not current_user.is_superuser:
         query = query.where(HoneypotEvent.user_id == current_user.id)
 
     if severity:
@@ -179,7 +179,7 @@ async def list_honeypot_events(
 )
 async def get_honeypot_event(
     event_id: str,
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> HoneypotEventResponse:
     """
@@ -203,7 +203,7 @@ async def get_honeypot_event(
             detail=f"Honeypot event '{event_id}' was not found.",
         )
 
-    if current_user and event.user_id and event.user_id != current_user.id and not current_user.is_superuser:
+    if event.user_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Honeypot event '{event_id}' was not found.",
@@ -220,7 +220,7 @@ async def get_honeypot_event(
 )
 async def analyze_honeypot_incident(
     event_id: str,
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> HoneypotAnalysisResponse:
     """
@@ -244,7 +244,7 @@ async def analyze_honeypot_incident(
             detail=f"Honeypot event '{event_id}' was not found.",
         )
 
-    if current_user and event.user_id and event.user_id != current_user.id and not current_user.is_superuser:
+    if event.user_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Honeypot event '{event_id}' was not found.",
@@ -262,13 +262,13 @@ async def analyze_honeypot_incident(
 )
 async def simulate_honeypot_probe(
     request: HoneypotSimulateRequest,
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> HoneypotEventResponse:
     """
     Safely inject a simulated test probe against a honeypot trap for verification and triage testing.
     """
-    user_id = current_user.id if current_user else None
+    user_id = current_user.id
 
     # Process through manager
     telemetry = await honeypot_manager.handle_simulated_probe(

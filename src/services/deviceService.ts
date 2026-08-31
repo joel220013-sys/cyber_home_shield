@@ -15,4 +15,8 @@ export const deviceService = {
   async getDeviceById(id: string): Promise<Device | null> {
     return await apiRequest<Device>(`/api/v1/devices/${id}`);
   },
+
+  async discoverInventory(): Promise<Device[]> {
+    return await apiRequest<Device[]>('/api/v1/devices/discover', { method: 'POST' }, 35000);
+  },
 };

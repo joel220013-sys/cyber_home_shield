@@ -1,5 +1,7 @@
 ﻿"""Device inventory and management API endpoints with resource ownership enforcement."""
 
+import asyncio
+import ipaddress
 import uuid
 from typing import List, Optional
 
@@ -9,22 +11,93 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
+    get_current_user,
     get_db,
     get_optional_current_user,
 )
-from app.core.security import is_rfc1918_private_ip
+from app.core.exceptions import ScopeValidationError
+from app.core.security import is_rfc1918_private_ip, validate_user_target_scope
 from app.models.device import Device
+from app.models.enums import DeviceType
 from app.models.user import User
 from app.schemas.device import (
     DeviceCreate,
     DeviceDetailResponse,
     DeviceResponse,
 )
+from app.config import settings
+from app.services.discovery.service import DiscoveryService
+from app.services.network import LocalNetworkDetector
 
 router = APIRouter(
     prefix="/devices",
     tags=["Devices"],
 )
+
+
+@router.post(
+    "/discover",
+    response_model=List[DeviceResponse],
+    summary="Refresh the authorized local device inventory",
+)
+async def discover_inventory_devices(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> List[DeviceResponse]:
+    """Run bounded discovery only for the detected, authorized local CIDR."""
+
+    detection = LocalNetworkDetector().detect()
+    if detection.status != "detected" or not detection.network_cidr:
+        return []
+    try:
+        network = ipaddress.ip_network(detection.network_cidr, strict=False)
+        authorized = ipaddress.ip_network(current_user.authorized_network_scope, strict=False)
+        if network.version != 4 or not network.subnet_of(authorized):
+            return []
+    except ValueError:
+        return []
+
+    try:
+        result, _ = await asyncio.wait_for(
+            DiscoveryService().execute_discovery(
+                target_str=detection.network_cidr,
+                db=db,
+                owner_user_id=current_user.id,
+                max_hosts=min(settings.MAX_HOSTS, 254),
+                local_ip=detection.local_ip,
+            ),
+            timeout=settings.DISCOVERY_TIMEOUT,
+        )
+    except (asyncio.TimeoutError, ScopeValidationError, ValueError):
+        return []
+
+    for host in result.hosts:
+        stmt = select(Device).where(Device.user_id == current_user.id)
+        if host.mac_address and not (int(host.mac_address[:2], 16) & 0x02):
+            stmt = stmt.where(Device.mac_address == host.mac_address)
+        else:
+            stmt = stmt.where(Device.ip_address == host.ip_address)
+        device = (await db.execute(stmt)).scalar_one_or_none()
+        if device is None:
+            continue
+        if host.ip_address == detection.gateway_ip:
+            device.device_role = "Gateway/Router"
+            device.device_type = DeviceType.ROUTER
+            evidence = dict(device.identity_evidence or {})
+            evidence["role"] = [{
+                "source": "default_gateway_route",
+                "detail": "IP matches the default gateway reported by the backend host routing table.",
+            }]
+            device.identity_evidence = evidence
+            device.identity_confidence = "HIGH"
+    await db.commit()
+
+    refreshed = await db.execute(
+        select(Device)
+        .where(Device.user_id == current_user.id)
+        .order_by(Device.last_seen.desc())
+    )
+    return [DeviceResponse.model_validate(device) for device in refreshed.scalars().all()]
 
 
 # ============================================================================
@@ -238,9 +311,7 @@ async def get_device(
 )
 async def create_device(
     request: DeviceCreate,
-    current_user: Optional[User] = Depends(
-        get_optional_current_user
-    ),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DeviceResponse:
     """
@@ -272,6 +343,17 @@ async def create_device(
             ),
         )
 
+    try:
+        validate_user_target_scope(
+            request.ip_address,
+            current_user.authorized_network_scope,
+        )
+    except ScopeValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Defensive Scope Violation: {exc}",
+        ) from exc
+
     # ------------------------------------------------------------------------
     # 2. Create device
     # ------------------------------------------------------------------------
@@ -279,11 +361,7 @@ async def create_device(
     device = Device(
         id=uuid.uuid4(),
 
-        user_id=(
-            current_user.id
-            if current_user is not None
-            else None
-        ),
+        user_id=current_user.id,
 
         ip_address=request.ip_address,
         mac_address=request.mac_address,
@@ -316,9 +394,7 @@ async def create_device(
 )
 async def delete_device(
     device_id: str,
-    current_user: Optional[User] = Depends(
-        get_optional_current_user
-    ),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -378,35 +454,15 @@ async def delete_device(
     # 4. Strict ownership check
     # ------------------------------------------------------------------------
 
-    if current_user is not None:
+    if not current_user.is_superuser and device.user_id != current_user.id:
 
-        # Superuser can delete any device.
-        if current_user.is_superuser:
-            pass
-
-        # Normal user can delete only own device.
-        elif device.user_id != current_user.id:
-
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"Device with ID '{device_id}' "
-                    "was not found."
-                ),
-            )
-
-    else:
-
-        # Anonymous users can delete only unowned devices.
-        if device.user_id is not None:
-
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"Device with ID '{device_id}' "
-                    "was not found."
-                ),
-            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Device with ID '{device_id}' "
+                "was not found."
+            ),
+        )
 
     # ------------------------------------------------------------------------
     # 5. Delete

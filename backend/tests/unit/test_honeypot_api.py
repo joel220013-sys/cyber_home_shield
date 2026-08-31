@@ -4,10 +4,34 @@ import pytest
 from httpx import AsyncClient
 
 
+async def _auth_headers(client: AsyncClient, email: str) -> dict[str, str]:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "PasswordUser123!",
+            "full_name": "Honeypot Test User",
+            "authorized_network_scope": "192.168.1.0/24",
+        },
+    )
+    assert response.status_code == 201
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.mark.asyncio
+async def test_honeypot_anonymous_access_rejected(async_client: AsyncClient):
+    """Verify all protected honeypot operations reject anonymous callers."""
+    assert (await async_client.get("/api/v1/honeypot/status")).status_code == 401
+    assert (await async_client.post("/api/v1/honeypot/start")).status_code == 401
+    assert (await async_client.get("/api/v1/honeypot/events")).status_code == 401
+    assert (await async_client.post("/api/v1/honeypot/simulate", json={"trap_type": "iot_gateway"})).status_code == 401
+
+
 @pytest.mark.asyncio
 async def test_honeypot_status_endpoint(async_client: AsyncClient):
     """Verify GET /api/v1/honeypot/status returns valid schema."""
-    response = await async_client.get("/api/v1/honeypot/status")
+    headers = await _auth_headers(async_client, "honeypot-status@home.local")
+    response = await async_client.get("/api/v1/honeypot/status", headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert "services" in data
@@ -18,15 +42,16 @@ async def test_honeypot_status_endpoint(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_honeypot_start_stop_endpoints(async_client: AsyncClient):
     """Verify POST /api/v1/honeypot/start and POST /api/v1/honeypot/stop."""
+    headers = await _auth_headers(async_client, "honeypot-lifecycle@home.local")
     # 1. Start with localhost
-    start_resp = await async_client.post("/api/v1/honeypot/start", json={"bind_host": "127.0.0.1"})
+    start_resp = await async_client.post("/api/v1/honeypot/start", json={"bind_host": "127.0.0.1"}, headers=headers)
     assert start_resp.status_code == 200
     start_data = start_resp.json()
     assert start_data["running"] is True
     assert start_data["bind_host"] == "127.0.0.1"
 
     # 2. Stop
-    stop_resp = await async_client.post("/api/v1/honeypot/stop")
+    stop_resp = await async_client.post("/api/v1/honeypot/stop", headers=headers)
     assert stop_resp.status_code == 200
     stop_data = stop_resp.json()
     assert stop_data["running"] is False
@@ -35,7 +60,8 @@ async def test_honeypot_start_stop_endpoints(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_honeypot_start_wan_rejection(async_client: AsyncClient):
     """Verify attempting to bind honeypot to a public WAN IP is rejected."""
-    resp = await async_client.post("/api/v1/honeypot/start", json={"bind_host": "8.8.8.8"})
+    headers = await _auth_headers(async_client, "honeypot-wan@home.local")
+    resp = await async_client.post("/api/v1/honeypot/start", json={"bind_host": "8.8.8.8"}, headers=headers)
     assert resp.status_code == 400
     assert "strictly prohibited" in resp.json()["detail"]
 
@@ -43,6 +69,7 @@ async def test_honeypot_start_wan_rejection(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_honeypot_simulate_and_list_events(async_client: AsyncClient):
     """Verify POST /api/v1/honeypot/simulate creates event and GET /api/v1/honeypot/events lists it."""
+    headers = await _auth_headers(async_client, "honeypot-events@home.local")
     sim_resp = await async_client.post(
         "/api/v1/honeypot/simulate",
         json={
@@ -51,6 +78,7 @@ async def test_honeypot_simulate_and_list_events(async_client: AsyncClient):
             "interaction_type": "login_attempt",
             "endpoint": "/login",
         },
+        headers=headers,
     )
     assert sim_resp.status_code == 201
     event_data = sim_resp.json()
@@ -58,7 +86,7 @@ async def test_honeypot_simulate_and_list_events(async_client: AsyncClient):
     assert event_data["destination_port"] == 8088
 
     # List events
-    list_resp = await async_client.get("/api/v1/honeypot/events")
+    list_resp = await async_client.get("/api/v1/honeypot/events", headers=headers)
     assert list_resp.status_code == 200
     events = list_resp.json()
     assert len(events) >= 1
@@ -68,6 +96,7 @@ async def test_honeypot_simulate_and_list_events(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_honeypot_analyze_endpoint(async_client: AsyncClient):
     """Verify POST /api/v1/honeypot/analyze/{id} returns Nemotron explanation."""
+    headers = await _auth_headers(async_client, "honeypot-analysis@home.local")
     # First simulate an event
     sim_resp = await async_client.post(
         "/api/v1/honeypot/simulate",
@@ -77,11 +106,12 @@ async def test_honeypot_analyze_endpoint(async_client: AsyncClient):
             "interaction_type": "ssh_connection",
             "endpoint": "ssh",
         },
+        headers=headers,
     )
     event_id = sim_resp.json()["id"]
 
     # Analyze
-    analyze_resp = await async_client.post(f"/api/v1/honeypot/analyze/{event_id}")
+    analyze_resp = await async_client.post(f"/api/v1/honeypot/analyze/{event_id}", headers=headers)
     assert analyze_resp.status_code == 200
     analysis = analyze_resp.json()
     assert "summary" in analysis

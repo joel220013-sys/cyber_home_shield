@@ -127,6 +127,18 @@ class DiscoveredHost(BaseModel):
         description="Resolved hostname if available.",
     )
 
+    vendor: str = Field(
+        default="",
+        description="Vendor only when supported by reliable local evidence.",
+    )
+
+    # These are deliberately separate from service observations.  Consumers
+    # can show exactly why an identity or reachability claim was made rather
+    # than inferring it from a port scan.
+    hostname_evidence: List[DiscoveryEvidence] = Field(default_factory=list)
+    vendor_evidence: List[DiscoveryEvidence] = Field(default_factory=list)
+    reachability_evidence: List[DiscoveryEvidence] = Field(default_factory=list)
+
     is_online: bool = Field(
         default=True
     )
@@ -211,6 +223,11 @@ class DiscoveryTarget(BaseModel):
         ge=1.0,
         le=300.0,
         description="Discovery timeout in seconds.",
+    )
+
+    local_ip: Optional[str] = Field(
+        default=None,
+        description="Locally assigned IPv4 address to exclude from remote results.",
     )
 
     @field_validator("target_subnet")

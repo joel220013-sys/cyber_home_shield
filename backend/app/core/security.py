@@ -26,6 +26,8 @@ RFC1918_NETWORKS = (
     ipaddress.ip_network("192.168.0.0/16"),
 )
 
+_revoked_tokens: Dict[str, int] = {}
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against the hashed password using bcrypt."""
@@ -90,6 +92,7 @@ def create_access_token(
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
         "nbf": int(now.timestamp()),
+        "jti": secrets.token_urlsafe(16),
     }
     if claims:
         payload.update(claims)
@@ -108,6 +111,33 @@ def create_access_token(
     return f"{header_b64}.{payload_b64}.{sig_b64}"
 
 
+def revoke_access_token(token: str) -> None:
+    """Revoke a token in this process without retaining its raw credential.
+
+    This denylist is intentionally process-local because no durable session
+    store is available without a schema change.
+    """
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    parts = token.strip().split(".")
+    expires_at = 0
+    if len(parts) == 3:
+        try:
+            expires_at = int(json.loads(_base64url_decode(parts[1]))["exp"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            expires_at = 0
+
+    _revoked_tokens[token_hash] = expires_at
+
+
+def is_token_revoked(token: str) -> bool:
+    """Return whether a token was logged out, pruning expired denylist entries."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    expired = [key for key, expires_at in _revoked_tokens.items() if expires_at and expires_at <= now]
+    for key in expired:
+        _revoked_tokens.pop(key, None)
+    return hashlib.sha256(token.encode("utf-8")).hexdigest() in _revoked_tokens
+
+
 def decode_access_token(token: str) -> Dict[str, Any]:
     """
     Decode and verify a standard RFC 7519 HS256 JWT access token.
@@ -115,6 +145,9 @@ def decode_access_token(token: str) -> Dict[str, Any]:
     """
     if not token or not isinstance(token, str):
         raise TokenInvalidError("Invalid token format.")
+
+    if is_token_revoked(token):
+        raise TokenInvalidError("Token has been revoked.")
 
     parts = token.strip().split(".")
     if len(parts) != 3:
@@ -212,6 +245,27 @@ def validate_defensive_target_scope(target: str) -> ipaddress.IPv4Network:
         return net
     except ValueError as e:
         raise ScopeValidationError(f"Invalid IP address or CIDR format: '{target_clean}' - {e}")
+
+
+def validate_user_target_scope(
+    target: str,
+    authorized_scope: str,
+) -> ipaddress.IPv4Network:
+    """Require a globally safe target to also fit the user's stored CIDR."""
+    target_network = validate_defensive_target_scope(target)
+    try:
+        user_network = ipaddress.ip_network(authorized_scope.strip(), strict=False)
+    except (AttributeError, ValueError, TypeError) as exc:
+        raise ScopeValidationError(
+            "The authenticated user's authorized network scope is invalid."
+        ) from exc
+
+    if user_network.version != 4 or not target_network.subnet_of(user_network):
+        raise ScopeValidationError(
+            f"Target {target.strip()} is outside the authenticated user's authorized network scope."
+        )
+
+    return target_network
 
 
 def mask_secret(secret_value: str, visible_chars: int = 4) -> str:

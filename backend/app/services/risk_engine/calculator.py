@@ -21,6 +21,7 @@ from app.services.risk_engine.models import (
     NetworkPostureResult,
     VulnerabilityResult,
 )
+from app.services.risk_engine.finding_aggregator import FindingAggregator
 
 
 # ============================================================================
@@ -171,6 +172,26 @@ class RiskCalculator:
         )
 
         return status_value in ACTIVE_FINDING_STATUSES
+
+    @staticmethod
+    def _finding_identity(finding: Any) -> tuple:
+        """Identify a finding consistently across generated and persisted data."""
+        evidence = RiskCalculator._get_value(finding, "evidence", {}) or {}
+        if not isinstance(evidence, dict):
+            evidence = {}
+
+        if evidence.get("source") == "open_port":
+            return (
+                RiskCalculator._get_value(finding, "category", ""),
+                RiskCalculator._get_value(finding, "title", ""),
+                evidence.get("port"),
+                evidence.get("protocol"),
+            )
+
+        return (
+            RiskCalculator._get_value(finding, "category", ""),
+            RiskCalculator._get_value(finding, "title", ""),
+        )
 
     # ========================================================================
     # VULNERABILITY SUBSCORE
@@ -496,12 +517,23 @@ class RiskCalculator:
         )
 
         # ====================================================================
-        # 3. Persisted findings
+        # 3. Current port findings plus persisted findings
         # ====================================================================
 
-        all_findings: List[Any] = list(
-            existing_findings
+        generated_findings = FindingAggregator.generate_findings_from_ports(
+            device_id,
+            open_ports,
         )
+        all_findings_by_identity = {
+            cls._finding_identity(finding): finding
+            for finding in existing_findings
+        }
+        for finding in generated_findings:
+            all_findings_by_identity.setdefault(
+                cls._finding_identity(finding),
+                finding,
+            )
+        all_findings = list(all_findings_by_identity.values())
 
         # ====================================================================
         # 4. Vulnerability

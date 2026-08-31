@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.core.security import is_rfc1918_private_ip
 from app.models.enums import DeviceType
@@ -18,6 +18,10 @@ class DeviceBase(BaseModel):
     hostname: str = Field(default="", max_length=255, description="Resolved network hostname")
     custom_name: str = Field(default="", max_length=255, description="User-assigned friendly name")
     vendor: str = Field(default="Unknown Vendor", max_length=255, description="Hardware manufacturer")
+    vendor_source: str = Field(default="", max_length=100)
+    device_role: str = Field(default="", max_length=100)
+    identity_confidence: str = Field(default="LOW", max_length=20)
+    identity_evidence: Dict[str, Any] = Field(default_factory=dict)
     device_type: DeviceType = Field(default=DeviceType.UNKNOWN, description="Classified device archetype")
     is_trusted: bool = Field(default=False, description="Whether device is verified by user")
     is_online: bool = Field(default=True, description="Current online reachability status")

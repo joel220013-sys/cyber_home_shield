@@ -18,7 +18,7 @@ export const aiService = {
     return await apiRequest<AIChatResponse>('/api/v1/ai/chat', {
       method: 'POST',
       body: JSON.stringify(payload),
-    });
+    }, 25000);
   },
 
   /**

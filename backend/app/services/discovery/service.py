@@ -172,6 +172,36 @@ class DiscoveryService:
             risk_reason="",
         )
 
+    @staticmethod
+    def _is_stable_mac(mac: str) -> bool:
+        """Only globally administered MACs may join inventory observations."""
+
+        try:
+            return bool(mac) and not (int(mac[:2], 16) & 0x02)
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _host_evidence(host: DiscoveredHost) -> dict:
+        """Persist only observed, non-sensitive discovery evidence."""
+
+        def serialize(items):
+            return [item.model_dump(mode="json") for item in items]
+
+        return {
+            "hostname": serialize(host.hostname_evidence),
+            "vendor": serialize(host.vendor_evidence),
+            "reachability": serialize(host.reachability_evidence),
+        }
+
+    @staticmethod
+    def _identity_confidence(host: DiscoveredHost) -> str:
+        if host.hostname and host.vendor:
+            return "HIGH"
+        if host.hostname or host.vendor or host.mac_address:
+            return "MEDIUM"
+        return "LOW"
+
     # ========================================================================
     # EXECUTE DISCOVERY
     # ========================================================================
@@ -182,6 +212,7 @@ class DiscoveryService:
         ports: Optional[List[int]] = None,
         dry_run: bool = False,
         max_hosts: Optional[int] = None,
+        local_ip: Optional[str] = None,
         db: Optional[AsyncSession] = None,
         scan_job_id: Optional[uuid.UUID] = None,
         owner_user_id: Optional[uuid.UUID] = None,
@@ -244,6 +275,7 @@ class DiscoveryService:
                 else settings.MAX_HOSTS
             ),
             timeout_seconds=settings.DISCOVERY_TIMEOUT,
+            local_ip=local_ip,
         )
 
         # ====================================================================
@@ -379,6 +411,23 @@ class DiscoveryService:
 
         scoped_devices_result = await db.execute(scoped_devices_query)
         scoped_devices = scoped_devices_result.scalars().all()
+        currently_reachable_ips = {
+            host.ip_address for host in result.hosts
+        }
+
+        # A completed scan is the current observation for this target. Keep
+        # historical rows, but do not leave disconnected devices online.
+        for scoped_device in scoped_devices:
+            try:
+                if ipaddress.ip_address(scoped_device.ip_address) in target_network:
+                    scoped_device.is_online = (
+                        scoped_device.ip_address in currently_reachable_ips
+                    )
+                else:
+                    scoped_device.is_online = False
+            except ValueError:
+                continue
+
         current_services_by_ip = {
             host.ip_address: {
                 (service.port, service.protocol)
@@ -423,6 +472,18 @@ class DiscoveryService:
                 owned_result = await db.execute(owned_query)
 
                 existing_device = owned_result.scalar_one_or_none()
+
+                # A globally administered MAC is stable identity evidence.
+                # Reuse it when DHCP changes the address; never use a locally
+                # administered/privacy MAC to merge separate devices.
+                if existing_device is None and self._is_stable_mac(host.mac_address):
+                    mac_result = await db.execute(
+                        select(Device).where(
+                            Device.mac_address == host.mac_address,
+                            Device.user_id == owner_user_id,
+                        )
+                    )
+                    existing_device = mac_result.scalar_one_or_none()
 
                 # -------------------------------------------------------------
                 # If no owned device exists, look for an unowned legacy
@@ -478,6 +539,9 @@ class DiscoveryService:
                 ):
                     existing_device.mac_address = host.mac_address
 
+                if existing_device.ip_address != host.ip_address and self._is_stable_mac(host.mac_address):
+                    existing_device.ip_address = host.ip_address
+
                 # -------------------------------------------------------------
                 # Update hostname only when available.
                 # -------------------------------------------------------------
@@ -487,6 +551,12 @@ class DiscoveryService:
                     and not existing_device.hostname
                 ):
                     existing_device.hostname = host.hostname
+
+                if host.vendor:
+                    existing_device.vendor = host.vendor
+                    existing_device.vendor_source = "ieee_oui_lookup"
+                existing_device.identity_evidence = self._host_evidence(host)
+                existing_device.identity_confidence = self._identity_confidence(host)
 
                 # -------------------------------------------------------------
                 # Update online state.
@@ -520,7 +590,11 @@ class DiscoveryService:
                     mac_address=host.mac_address or "",
                     hostname=host.hostname or "",
                     custom_name="",
-                    vendor="Unknown Vendor",
+                    vendor=host.vendor or "",
+                    vendor_source=("ieee_oui_lookup" if host.vendor else ""),
+                    device_role="",
+                    identity_confidence=self._identity_confidence(host),
+                    identity_evidence=self._host_evidence(host),
                     device_type=DeviceType.UNKNOWN,
                     is_trusted=False,
                     is_online=True,

@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import Protocol, Severity
 from app.models.honeypot_event import HoneypotEvent
+from app.models.device import Device
+from app.models.user import User
 from app.models.security_finding import SecurityFinding
 from app.services.honeypot.base import HoneypotTelemetryEvent
 from app.services.honeypot.event_logger import (
@@ -81,4 +83,42 @@ async def test_log_honeypot_event_persistence(db_session: AsyncSession):
     fetched = res.scalar_one_or_none()
     assert fetched is not None
     assert fetched.endpoint == "/status"
+
+
+@pytest.mark.asyncio
+async def test_honeypot_anomaly_device_correlation_is_owner_scoped(db_session: AsyncSession):
+    """An anomaly cannot attach a finding to another user's same-IP device."""
+    user_a = User(id=uuid.uuid4(), email="honeypot-a@local", hashed_password="x")
+    user_b = User(id=uuid.uuid4(), email="honeypot-b@local", hashed_password="x")
+    device_a = Device(
+        id=uuid.uuid4(), user_id=user_a.id, ip_address="192.168.1.240",
+        mac_address="AA:00:00:00:00:01",
+    )
+    device_b = Device(
+        id=uuid.uuid4(), user_id=user_b.id, ip_address="192.168.1.240",
+        mac_address="AA:00:00:00:00:02",
+    )
+    db_session.add_all([user_a, user_b, device_a, device_b])
+    await db_session.flush()
+
+    for _ in range(5):
+        telemetry = HoneypotTelemetryEvent(
+            user_id=user_a.id,
+            honeypot_id="iot_gateway",
+            source_ip="192.168.1.240",
+            destination_ip="127.0.0.1",
+            destination_port=8088,
+            protocol=Protocol.TCP,
+            interaction_type="login_attempt",
+            endpoint="/login",
+            payload_sample="",
+            metadata_fields={},
+            severity=Severity.LOW,
+        )
+        await log_honeypot_event(db_session, telemetry)
+
+    findings = (await db_session.execute(select(SecurityFinding))).scalars().all()
+    assert len(findings) == 1
+    assert findings[0].device_id == device_a.id
+    assert findings[0].device_id != device_b.id
 

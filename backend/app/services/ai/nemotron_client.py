@@ -67,8 +67,9 @@ class NemotronClient(BaseAIAdvisor):
         timeout: float = 20.0,
     ):
         self.api_key = (
-            api_key
-            or settings.NVIDIA_API_KEY
+            settings.NVIDIA_API_KEY
+            if api_key is None
+            else api_key
         )
 
         self.base_url = (
@@ -112,8 +113,7 @@ class NemotronClient(BaseAIAdvisor):
         if self._client is None:
             if not self.is_configured:
                 raise ValueError(
-                    "NVIDIA_API_KEY or NVIDIA_MODEL "
-                    "is not configured."
+                    "NVIDIA_API_KEY is not configured."
                 )
 
             self._client = AsyncOpenAI(
@@ -1190,8 +1190,6 @@ class NemotronClient(BaseAIAdvisor):
                 model_name=self.model,
             )
 
-        client = self._get_client()
-
         messages: List[
             Dict[str, str]
         ] = [
@@ -1264,6 +1262,7 @@ class NemotronClient(BaseAIAdvisor):
         # --------------------------------------------------------------
 
         try:
+            client = self._get_client()
             response = (
                 await client.chat.completions.create(
                     model=self.model,
@@ -1310,10 +1309,9 @@ class NemotronClient(BaseAIAdvisor):
             )
 
             if not reply:
-                reply = (
-                    "Nemotron returned an empty "
-                    "advisory response. Please try "
-                    "the question again."
+                raise AIValidationError(
+                    "NVIDIA Nemotron returned an empty "
+                    "advisory response."
                 )
 
             return AIChatResponse(

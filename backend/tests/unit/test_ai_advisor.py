@@ -350,6 +350,62 @@ async def test_18_mocked_nemotron_chat():
         assert res.ai_available is True
 
 
+@pytest.mark.asyncio
+async def test_18a_mocked_nemotron_chat_preserves_model_content():
+    """Verify valid model content is returned unchanged to the caller."""
+    client = NemotronClient(api_key="mock-key")
+    mock_choice = MagicMock()
+    mock_choice.message.content = "MODEL_CONTENT_SENTINEL"
+    mock_response = MagicMock(choices=[mock_choice])
+
+    with patch.object(client, "_get_client") as mock_get_client:
+        mock_openai_client = MagicMock()
+        mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_get_client.return_value = mock_openai_client
+
+        result = await client.chat_advisory("Give me one defensive recommendation.")
+
+    assert result.reply == "MODEL_CONTENT_SENTINEL"
+    assert result.ai_available is True
+
+
+@pytest.mark.asyncio
+async def test_18b_mocked_nemotron_chat_timeout_returns_fallback():
+    """Verify a model timeout returns the deterministic chat fallback."""
+    client = NemotronClient(api_key="mock-key")
+    with patch.object(client, "_get_client") as mock_get_client:
+        mock_openai_client = MagicMock()
+        mock_openai_client.chat.completions.create = AsyncMock(
+            side_effect=openai.APITimeoutError(request=MagicMock())
+        )
+        mock_get_client.return_value = mock_openai_client
+
+        result = await client.chat_advisory("Give me one defensive recommendation.")
+
+    assert result.ai_available is False
+    assert "temporarily unreachable" in result.reply
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [None, "", "<think>internal reasoning</think>"])
+async def test_18c_mocked_nemotron_chat_empty_content_returns_fallback(content):
+    """Verify empty or reasoning-only model content returns a safe fallback."""
+    client = NemotronClient(api_key="mock-key")
+    mock_choice = MagicMock()
+    mock_choice.message.content = content
+    mock_response = MagicMock(choices=[mock_choice])
+
+    with patch.object(client, "_get_client") as mock_get_client:
+        mock_openai_client = MagicMock()
+        mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_get_client.return_value = mock_openai_client
+
+        result = await client.chat_advisory("Give me one defensive recommendation.")
+
+    assert result.ai_available is False
+    assert "temporarily unreachable" in result.reply
+
+
 # ==============================================================================
 # 5. Fallback & Resilience Tests (Timeout, Rate Limit, Connection Failure)
 # ==============================================================================

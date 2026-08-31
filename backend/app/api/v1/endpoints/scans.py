@@ -17,7 +17,7 @@ from app.api.deps import (
     rate_limit_scans,
 )
 from app.core.exceptions import ScopeValidationError
-from app.core.security import validate_defensive_target_scope
+from app.core.security import validate_user_target_scope
 from app.db.session import AsyncSessionLocal
 from app.models.enums import ScanStatus, ScanType
 from app.models.scan_job import ScanJob
@@ -190,9 +190,7 @@ async def list_scans(
 )
 async def create_scan(
     request: ScanRequest,
-    current_user: Optional[User] = Depends(
-        get_optional_current_user
-    ),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanJobResponse:
     """
@@ -214,8 +212,9 @@ async def create_scan(
     # ============================================================
 
     try:
-        validate_defensive_target_scope(
-            request.target_subnet
+        validate_user_target_scope(
+            request.target_subnet,
+            current_user.authorized_network_scope,
         )
 
     except ScopeValidationError as exc:
@@ -240,11 +239,7 @@ async def create_scan(
     # 2. DETERMINE AUTHENTICATED OWNER
     # ============================================================
 
-    owner_user_id = (
-        current_user.id
-        if current_user is not None
-        else None
-    )
+    owner_user_id = current_user.id
 
     # ============================================================
     # 3. CREATE SCAN JOB

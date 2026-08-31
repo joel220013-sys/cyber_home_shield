@@ -49,11 +49,12 @@ export const DeviceTable: React.FC<DeviceTableProps> = ({ devices, onSelectDevic
       <table className="w-full text-left text-xs text-slate-300">
         <thead className="border-b border-slate-800 bg-slate-950/80 text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
           <tr>
-            <th className="px-4 py-3">Device Identity</th>
+            <th className="px-4 py-3">Identity</th>
             <th className="px-4 py-3">IP & MAC Address</th>
-            <th className="px-4 py-3">Observed Ports</th>
-            <th className="px-4 py-3">Risk Posture</th>
+            <th className="px-4 py-3">Device Type / Role</th>
+            <th className="px-4 py-3">Evidence</th>
             <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">First Seen</th>
             <th className="px-4 py-3">Last Seen</th>
             <th className="px-4 py-3 text-right">Actions</th>
           </tr>
@@ -78,8 +79,8 @@ export const DeviceTable: React.FC<DeviceTableProps> = ({ devices, onSelectDevic
                       <Icon className="h-4 w-4" />
                     </div>
                     <div>
-                      <div className="font-semibold text-slate-100">{device.hostname || 'Unknown Host'}</div>
-                      <div className="text-[11px] text-slate-400">{device.vendor || device.device_type}</div>
+                      <div className="font-semibold text-slate-100">{device.hostname || 'Hostname unavailable'}</div>
+                      <div className="text-[11px] text-slate-400">{device.vendor || (device.mac_address && (parseInt(device.mac_address.slice(0, 2), 16) & 2) ? 'Vendor unavailable because MAC is locally administered' : 'Vendor lookup failed')}</div>
                     </div>
                   </div>
                 </td>
@@ -90,40 +91,16 @@ export const DeviceTable: React.FC<DeviceTableProps> = ({ devices, onSelectDevic
                   <div className="text-[10px] text-slate-400">{device.mac_address || 'N/A'}</div>
                 </td>
 
-                {/* Open Ports */}
+                {/* Type and role are identity claims only when discovery evidence supports them. */}
                 <td className="px-4 py-3.5">
-                  <div className="flex flex-wrap gap-1">
-                    {portCount > 0 ? (
-                      device.ports?.slice(0, 3).map((p, i) => (
-                        <span
-                          key={i}
-                          className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-300 border border-slate-700"
-                        >
-                          {p.port_number}/{p.service_name || p.protocol.toLowerCase()}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-slate-400 text-[11px]">0 open ports</span>
-                    )}
-                    {portCount > 3 && (
-                      <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
-                        +{portCount - 3}
-                      </span>
-                    )}
-                  </div>
+                  <div className="text-slate-200">{device.device_type === 'UNKNOWN' ? 'Unidentified device' : device.device_type}</div>
+                  <div className="text-[10px] text-slate-400">{device.device_role || 'Role unavailable'}</div>
                 </td>
 
-                {/* Risk Score */}
                 <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-flex items-center justify-center h-6 px-2 rounded font-bold text-xs border ${risk.badgeBg} ${risk.badgeBorder} ${risk.badgeText}`}
-                    >
-                      {score}
-                    </span>
-                    <span className="text-[10px] uppercase font-semibold text-slate-400">
-                      {risk.label.replace(' RISK', '')}
-                    </span>
+                  <div className="max-w-48 space-y-1 text-[10px] text-slate-400">
+                    {Object.entries(device.identity_evidence || {}).flatMap(([category, values]) => values.slice(0, 1).map((value, index) => <div key={`${category}-${index}`}>{category}: {value.raw_response || value.detail || 'observed'}</div>))}
+                    {!Object.keys(device.identity_evidence || {}).length && <span>No identity evidence recorded yet</span>}
                   </div>
                 </td>
 
@@ -133,6 +110,10 @@ export const DeviceTable: React.FC<DeviceTableProps> = ({ devices, onSelectDevic
                     status={device.is_online ? 'Online' : 'Offline'}
                     variant={device.is_online ? 'online' : 'offline'}
                   />
+                </td>
+
+                <td className="px-4 py-3.5 text-slate-400 text-[11px]">
+                  {formatTimestamp(device.first_seen)}
                 </td>
 
                 {/* Last Seen */}

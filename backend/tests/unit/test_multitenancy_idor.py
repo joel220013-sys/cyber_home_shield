@@ -1,5 +1,6 @@
 """Unit tests verifying multi-tenancy data isolation and IDOR protection."""
 
+import uuid
 import pytest
 from httpx import AsyncClient
 
@@ -137,3 +138,54 @@ async def test_cross_tenant_scan_isolation(async_client: AsyncClient):
         headers={"Authorization": f"Bearer {token_b}"},
     )
     assert get_scan_b.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_device_enrollment_enforces_user_scope(async_client: AsyncClient):
+    """Manual device enrollment must enforce the authenticated user's CIDR."""
+    registration = await async_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "device-scope@home.local",
+            "password": "DeviceScope123!",
+            "full_name": "Device Scope",
+            "authorized_network_scope": "172.16.5.0/24",
+        },
+    )
+    headers = {"Authorization": f"Bearer {registration.json()['access_token']}"}
+    payload = {
+        "ip_address": "172.16.5.20",
+        "mac_address": "AA:BB:CC:DD:EE:20",
+        "hostname": "in-scope-device",
+        "device_type": "IOT",
+    }
+    allowed = await async_client.post("/api/v1/devices", json=payload, headers=headers)
+    assert allowed.status_code == 201
+
+    outside = await async_client.post(
+        "/api/v1/devices",
+        json={**payload, "ip_address": "172.16.6.20", "mac_address": "AA:BB:CC:DD:EE:21"},
+        headers=headers,
+    )
+    assert outside.status_code == 400
+
+    public = await async_client.post(
+        "/api/v1/devices",
+        json={**payload, "ip_address": "8.8.8.8", "mac_address": "AA:BB:CC:DD:EE:22"},
+        headers=headers,
+    )
+    assert public.status_code in (400, 422)
+
+
+@pytest.mark.asyncio
+async def test_anonymous_device_mutation_rejected(async_client: AsyncClient):
+    """Device enrollment and deletion require an authenticated owner."""
+    payload = {
+        "ip_address": "192.168.1.230",
+        "mac_address": "AA:BB:CC:DD:EE:30",
+        "hostname": "private-device",
+        "device_type": "IOT",
+    }
+    create_response = await async_client.post("/api/v1/devices", json=payload)
+    assert create_response.status_code == 401
+    assert (await async_client.delete(f"/api/v1/devices/{uuid.uuid4()}")).status_code == 401

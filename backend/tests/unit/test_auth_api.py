@@ -2,6 +2,8 @@
 
 import pytest
 from httpx import AsyncClient
+from datetime import timedelta
+from app.core.security import create_access_token
 
 
 @pytest.mark.asyncio
@@ -156,7 +158,42 @@ async def test_update_profile(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_logout(async_client: AsyncClient):
-    """Test calling logout endpoint."""
-    res = await async_client.post("/api/v1/auth/logout")
+    """Test logout invalidates the logged-in token without affecting new sessions."""
+    payload = {
+        "email": "logout@home.local",
+        "password": "LogoutPassword123!",
+        "full_name": "Logout Test",
+        "authorized_network_scope": "192.168.1.0/24",
+    }
+    await async_client.post("/api/v1/auth/register", json=payload)
+    login_res = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert (await async_client.get("/api/v1/auth/me", headers=headers)).status_code == 200
+    res = await async_client.post("/api/v1/auth/logout", headers=headers)
     assert res.status_code == 200
     assert "logged out" in res.json()["message"]
+    assert (await async_client.get("/api/v1/auth/me", headers=headers)).status_code == 401
+
+    new_login = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+    assert new_login.status_code == 200
+    new_headers = {"Authorization": f"Bearer {new_login.json()['access_token']}"}
+    assert (await async_client.get("/api/v1/auth/me", headers=new_headers)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_expired_token_remains_rejected(async_client: AsyncClient):
+    """Token revocation must not weaken existing expiration rejection."""
+    token = create_access_token("expired-user", expires_delta=timedelta(seconds=-1))
+    response = await async_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    get_current_user,
     get_db,
     get_optional_current_user,
     rate_limit_ai,
@@ -29,6 +30,28 @@ from app.services.ai.service import ai_service
 router = APIRouter(prefix="/ai", tags=["AI Security Advisor"])
 
 
+def _require_resource_access(
+    owner_id: Optional[uuid.UUID],
+    current_user: Optional[User],
+    resource_name: str,
+) -> None:
+    """Reject anonymous or cross-tenant access to an owned resource."""
+    if (
+        owner_id is not None
+        and (
+            current_user is None
+            or (
+                owner_id != current_user.id
+                and not current_user.is_superuser
+            )
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{resource_name} was not found.",
+        )
+
+
 class HardeningGuideRequest(BaseModel):
     """Request payload for hardening guidelines."""
     target_type: str = Field(..., description="Target device or service type, e.g. 'ROUTER', 'IOT', 'STORAGE'")
@@ -44,6 +67,7 @@ class HardeningGuideRequest(BaseModel):
 )
 async def triage_event(
     request: AITriageRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AITriageResponse:
     """
@@ -74,7 +98,7 @@ async def triage_event(
 )
 async def chat_advisory(
     request: AIChatRequest,
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AIChatResponse:
     """
@@ -90,15 +114,16 @@ async def chat_advisory(
                 res = await db.execute(stmt)
                 dev = res.scalar_one_or_none()
                 if dev:
-                    # IDOR check if device belongs to another user
-                    if current_user and dev.user_id and dev.user_id != current_user.id and not current_user.is_superuser:
-                        pass
-                    else:
-                        context_data = {
-                            "device_id": str(dev.id),
-                            "ip_address": dev.ip_address,
-                            "device_type": str(dev.device_type),
-                        }
+                    _require_resource_access(
+                        dev.user_id,
+                        current_user,
+                        "Device",
+                    )
+                    context_data = {
+                        "device_id": str(dev.id),
+                        "ip_address": dev.ip_address,
+                        "device_type": str(dev.device_type),
+                    }
             except ValueError:
                 pass
 
@@ -107,6 +132,8 @@ async def chat_advisory(
             history=request.history,
             context=context_data,
         )
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -147,11 +174,7 @@ async def explain_device_risk(
             detail=f"Device with id '{device_id}' was not found.",
         )
 
-    if current_user and dev.user_id and dev.user_id != current_user.id and not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Device with id '{device_id}' was not found.",
-        )
+    _require_resource_access(dev.user_id, current_user, "Device")
 
     return await ai_service.explain_device(str(uuid_obj), db)
 
@@ -192,11 +215,11 @@ async def explain_security_finding(
     dev_stmt = select(Device).where(Device.id == finding.device_id)
     dev_res = await db.execute(dev_stmt)
     dev = dev_res.scalar_one_or_none()
-    if dev and current_user and dev.user_id and dev.user_id != current_user.id and not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Finding with id '{finding_id}' was not found.",
-        )
+    _require_resource_access(
+        dev.user_id if dev else None,
+        current_user,
+        "Finding",
+    )
 
     return await ai_service.explain_finding(str(uuid_obj), db)
 
@@ -209,6 +232,7 @@ async def explain_security_finding(
 )
 async def generate_hardening_guide(
     request: HardeningGuideRequest,
+    current_user: User = Depends(get_current_user),
 ) -> HardeningGuideResponse:
     """
     Generate actionable step-by-step defensive hardening guide for a device type or open services.
