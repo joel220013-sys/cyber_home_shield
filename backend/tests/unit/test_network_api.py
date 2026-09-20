@@ -569,3 +569,63 @@ async def test_network_discovery_timeout_returns_safe_unavailable(async_client: 
         )
     assert response.status_code == 200
     assert response.json()["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_network_discovery_slash_22_network_regression(async_client: AsyncClient):
+    """Verify live discovery executes correctly against /22 subnets without truncating to /24."""
+    headers = await _headers(async_client, "172.21.80.0/22")
+    detection = RouterDetectionResponse(
+        status="detected",
+        gateway_ip="172.21.80.1",
+        local_ip="172.21.82.181",
+        network_cidr="172.21.80.0/22",
+        interface="Wi-Fi",
+        connection_type="ethernet",
+    )
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    result = DiscoveryResult(
+        target="172.21.80.0/22",
+        started_at=now,
+        completed_at=now,
+        hosts=[
+            DiscoveredHost(
+                ip_address="172.21.80.1",
+                mac_address="80:F0:CF:18:B2:FA",
+                vendor="Ruckus Wireless",
+                is_online=True,
+                services=[DiscoveredService(port=22, state="open")],
+            ),
+            DiscoveredHost(
+                ip_address="172.21.82.151",
+                mac_address="18:84:C1:B3:2B:9B",
+                vendor="Guangzhou Shiyuan Electronic",
+                is_online=True,
+                services=[],
+            ),
+        ],
+        services=[],
+        evidence=[],
+        errors=[],
+    )
+    with patch.object(LocalNetworkDetector, "detect", return_value=detection), patch(
+        "app.api.v1.endpoints.network.DiscoveryService.execute_discovery",
+        return_value=(result, None),
+    ) as execute:
+        response = await async_client.post(
+            "/api/v1/network/devices/discover",
+            json={},
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["network"] == "172.21.80.0/22"
+    assert len(data["devices"]) == 2
+    assert data["devices"][0]["ip"] == "172.21.80.1"
+    assert data["devices"][0]["device_role"] == "Gateway/Router"
+    assert data["devices"][1]["ip"] == "172.21.82.151"
+    execute.assert_awaited_once()
+    assert execute.await_args.kwargs["target_str"] == "172.21.80.0/22"
+

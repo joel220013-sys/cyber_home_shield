@@ -67,6 +67,9 @@ def setup_logging(debug: bool = False) -> None:
         logging.DEBUG if debug else logging.INFO
     )
 
+    # Keep SQLAlchemy engine logging clean unless warnings or errors occur.
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
 
 # Backwards-compatible alias.
 configure_logging = setup_logging

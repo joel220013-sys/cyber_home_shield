@@ -188,3 +188,32 @@ async def test_invalid_server_scope_is_rejected(async_client: AsyncClient, db_se
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_startup_orphaned_scan_recovery(db_session):
+    """Verify _recover_orphaned_scans marks lingering RUNNING/PENDING scans as FAILED."""
+    from tests.conftest import TestAsyncSessionLocal
+    from app.main import _recover_orphaned_scans
+    from app.models.enums import ScanStatus, ScanType
+    from app.models.scan_job import ScanJob
+
+    orphaned_job = ScanJob(
+        id=uuid.uuid4(),
+        target_subnet="192.168.1.0/24",
+        scan_type=ScanType.DISCOVERY,
+        status=ScanStatus.RUNNING,
+        devices_found=0,
+        ports_scanned=0,
+    )
+    db_session.add(orphaned_job)
+    await db_session.commit()
+
+    await _recover_orphaned_scans(session_factory=TestAsyncSessionLocal)
+
+    await db_session.refresh(orphaned_job)
+    assert orphaned_job.status == ScanStatus.FAILED
+    assert orphaned_job.completed_at is not None
+    assert "interrupted" in orphaned_job.error_message.lower()
+
+

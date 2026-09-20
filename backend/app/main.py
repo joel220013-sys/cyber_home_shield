@@ -1,4 +1,4 @@
-﻿"""FastAPI application entrypoint for Cyber Home Shield with security hardening."""
+"""FastAPI application entrypoint for Cyber Home Shield with security hardening."""
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -7,10 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from datetime import datetime, timezone
+from sqlalchemy import update
+
 from app.api.v1.api_router import api_router
 from app.config import settings
 from app.core.exceptions import AppBaseException
 from app.core.logging import logger, setup_logging
+from app.db.session import AsyncSessionLocal
+from app.models.enums import ScanStatus
+from app.models.scan_job import ScanJob
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -30,6 +36,28 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+async def _recover_orphaned_scans(session_factory=None) -> None:
+    """Mark any leftover PENDING or RUNNING scans from previous interrupted process as FAILED."""
+    factory = session_factory or AsyncSessionLocal
+    try:
+        async with factory() as db:
+            stmt = (
+                update(ScanJob)
+                .where(ScanJob.status.in_([ScanStatus.PENDING, ScanStatus.RUNNING]))
+                .values(
+                    status=ScanStatus.FAILED,
+                    completed_at=datetime.now(timezone.utc),
+                    error_message="Scan interrupted by server restart or shutdown.",
+                )
+            )
+            res = await db.execute(stmt)
+            await db.commit()
+            if res.rowcount and res.rowcount > 0:
+                logger.info("Cleaned up %d orphaned scan job(s) from previous run.", res.rowcount)
+    except Exception as e:
+        logger.warning("Could not execute orphaned scan recovery on startup: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown lifespan management."""
@@ -41,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.ENVIRONMENT,
         settings.DEBUG,
     )
+    await _recover_orphaned_scans()
     yield
     logger.info("Shutting down %s", settings.APP_NAME)
 

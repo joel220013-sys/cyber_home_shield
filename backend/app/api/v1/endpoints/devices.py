@@ -1,4 +1,4 @@
-﻿"""Device inventory and management API endpoints with resource ownership enforcement."""
+"""Device inventory and management API endpoints with resource ownership enforcement."""
 
 import asyncio
 import ipaddress
@@ -54,7 +54,7 @@ async def discover_inventory_devices(
         authorized = ipaddress.ip_network(current_user.authorized_network_scope, strict=False)
         if network.version != 4 or not network.subnet_of(authorized):
             return []
-    except ValueError:
+    except (ValueError, TypeError):
         return []
 
     try:

@@ -353,7 +353,7 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
                         return ip, None
                     return ip, await probe(
                         ip,
-                        timeout_seconds=settings.ICMP_PROBE_TIMEOUT,
+                        timeout_seconds=min(settings.CONNECT_TIMEOUT, 0.5),
                     )
                 except Exception as exc:
                     logger.debug("Error probing host %s: %s", ip, exc)
@@ -396,16 +396,9 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
                     if normalized_mac:
                         arp_table[ip_str] = normalized_mac
 
-        # Every candidate must have fresh evidence to be marked *online*.
-        # A failed ICMP probe is never converted into reachability by
-        # stale ARP alone -- but a stale/passive ARP entry still earns a
-        # bounded TCP audit, because an open service is its own proof of
-        # liveness independent of ICMP. Without this, any host that only
-        # showed up via a passive ARP-table read (e.g. `arp -a`) and
-        # failed a single 0.5-1.2s ping (common on a phone hotspot with
-        # AP isolation, or a host that simply doesn't answer ICMP) was
-        # dropped before ever being TCP-scanned, so it could never
-        # appear in results even if genuinely reachable.
+        # Every candidate must have fresh evidence. If ICMP is unavailable,
+        # retain candidates for the existing bounded TCP fallback; a failed
+        # ICMP probe is never converted into reachability by stale ARP.
         audit_candidates = [
             (
                 ip,
@@ -421,7 +414,6 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
             if (
                 ip in scoped_current_neighbors
                 or ip in scoped_active_arp_hosts
-                or ip in scoped_arp_hosts
                 or probe_results.get(ip) is True
                 or probe_results.get(ip) is None
             )

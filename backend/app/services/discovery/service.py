@@ -1,4 +1,4 @@
-﻿"""
+"""
 Discovery Service orchestrator.
 
 Responsibilities:
@@ -391,9 +391,15 @@ class DiscoveryService:
             strict=False,
         )
         candidate_ips = {
-            str(ip)
-            for ip in list(target_network.hosts())[: target.max_hosts]
-        } if "/" in target.target_subnet else {target.target_subnet.strip()}
+            host.ip_address for host in result.hosts
+        } | (
+            {
+                str(ip)
+                for ip in list(target_network.hosts())[: target.max_hosts]
+            }
+            if "/" in target.target_subnet
+            else {target.target_subnet.strip()}
+        )
 
         scoped_devices_query = (
             select(Device)

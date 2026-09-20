@@ -557,25 +557,6 @@ class SafeHostDiscoverer:
             )
             return {}
 
-        if os.name == "nt":
-            try:
-                import ctypes
-
-                is_admin = bool(
-                    ctypes.windll.shell32.IsUserAnAdmin()  # type: ignore[attr-defined]
-                )
-            except Exception:
-                is_admin = None
-
-            if is_admin is False:
-                logger.warning(
-                    "Active ARP scan skipped: not running as "
-                    "Administrator. Raw-socket ARP requests require "
-                    "Administrator privileges on Windows -- restart the "
-                    "backend from an elevated terminal/IDE to enable it."
-                )
-                return {}
-
         def _scan() -> Dict[str, str]:
             try:
                 packet = (
@@ -622,18 +603,7 @@ class SafeHostDiscoverer:
                 timeout=timeout_seconds + 1.0,
             )
         except asyncio.TimeoutError:
-            logger.warning(
-                "Active ARP scan timed out with no replies after "
-                "%.1fs, even though privileges looked sufficient. "
-                "On Windows this usually means Npcap is missing or "
-                "not installed in 'WinPcap API-compatible Mode', or "
-                "scapy picked the wrong network adapter (not the "
-                "Wi-Fi/hotspot interface actually in use). "
-                "Verify Npcap at https://npcap.com/#download and "
-                "that 'ipconfig' shows the same interface scapy is "
-                "bound to.",
-                timeout_seconds,
-            )
+            logger.debug("Active ARP scan timed out.")
             return {}
 
     @classmethod

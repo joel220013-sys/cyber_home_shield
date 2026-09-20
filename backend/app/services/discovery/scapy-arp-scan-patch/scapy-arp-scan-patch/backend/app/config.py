@@ -128,14 +128,6 @@ class Settings(BaseSettings):
     # Timeout for an individual TCP connection.
     CONNECT_TIMEOUT: float = 0.5
 
-    # Timeout for an individual ICMP reachability probe (ping). Kept
-    # separate from CONNECT_TIMEOUT because ping has extra overhead
-    # (subprocess spawn, OS ICMP stack) that TCP connect does not, and
-    # a too-short value causes real, slightly-slow-to-answer hosts
-    # (e.g. over a mobile hotspot) to be wrongly marked unreachable
-    # and dropped from discovery results entirely.
-    ICMP_PROBE_TIMEOUT: float = 1.2
-
     # Maximum number of hosts that can be inspected.
     MAX_HOSTS: int = 254
 

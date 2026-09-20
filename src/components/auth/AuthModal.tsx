@@ -3,7 +3,7 @@
  * Enforces defensive scope validation and secure credential entry.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Shield,
   Lock,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isValidIPv4Subnet } from '../../lib/utils';
+import { networkService } from '../../services/networkService';
 
 export const AuthModal: React.FC = () => {
   const { authModalOpen, authModalMode, closeAuthModal, openAuthModal, login, register } = useAuth();
@@ -27,6 +28,16 @@ export const AuthModal: React.FC = () => {
   const [subnet, setSubnet] = useState('192.168.1.0/24');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (authModalOpen && authModalMode === 'register') {
+      networkService.detectRouter().then((res) => {
+        if (res.status === 'detected' && res.network_cidr) {
+          setSubnet(res.network_cidr);
+        }
+      }).catch(() => {});
+    }
+  }, [authModalOpen, authModalMode]);
 
   if (!authModalOpen) return null;
 

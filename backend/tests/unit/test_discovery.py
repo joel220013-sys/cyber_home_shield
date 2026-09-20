@@ -1,8 +1,8 @@
-﻿"""Unit tests for defensive network discovery subsystem."""
+"""Unit tests for defensive network discovery subsystem."""
 
 import asyncio
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from app.core.exceptions import ScopeValidationError
 from app.core.security import validate_defensive_target_scope
@@ -284,8 +284,8 @@ async def test_14_discovery_result_validation():
     )
     result = DiscoveryResult(
         target="192.168.1.0/24",
-        started_at=datetime.utcnow(),
-        completed_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
         hosts=[],
         services=[],
         evidence=[],

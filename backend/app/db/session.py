@@ -1,4 +1,4 @@
-﻿"""Database connection session management with SQLAlchemy 2.x async engine."""
+"""Database connection session management with SQLAlchemy 2.x async engine."""
 
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import (
@@ -15,7 +15,7 @@ if "sqlite" in settings.DATABASE_URL:
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=False,
     future=True,
     pool_pre_ping=True,
     connect_args=connect_args,

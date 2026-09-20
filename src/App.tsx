@@ -167,7 +167,7 @@ function DashboardContent() {
 
               {/* Recent Findings Feed */}
               <RecentFindingsFeed
-                findings={[]}
+                findings={findings}
                 onSelectFinding={(f) => setTriageTarget({ finding: f })}
                 onViewAll={() => setActiveTab('findings')}
               />
