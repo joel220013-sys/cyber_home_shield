@@ -1,4 +1,4 @@
-﻿"""Honeypot Subsystem Manager.
+"""Honeypot Subsystem Manager.
 
 Coordinates deception traps, lifecycle management, safe socket bindings,
 and telemetry event routing.
@@ -6,6 +6,7 @@ and telemetry event routing.
 
 import asyncio
 import logging
+import socket
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import uuid
@@ -102,6 +103,21 @@ class HoneypotManager:
         self._is_running = False
         logger.info("Honeypot Manager stopped.")
 
+    @staticmethod
+    def get_lan_ip() -> str:
+        """Resolve the primary active LAN IPv4 address (e.g. 192.168.x.x, 10.x.x.x)."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Route lookup without sending packets to external network
+            s.connect(("10.255.255.255", 1))
+            ip = s.getsockname()[0]
+            s.close()
+            if ip and not ip.startswith("127."):
+                return ip
+        except Exception:
+            pass
+        return "127.0.0.1"
+
     def get_trap(self, trap_id: str) -> Optional[BaseHoneypotTrap]:
         return self._traps.get(trap_id)
 
@@ -125,10 +141,15 @@ class HoneypotManager:
             for trap in self._traps.values()
         ]
 
+        lan_ip = self.get_lan_ip()
+        profile = getattr(settings, "HONEYPOT_DECOY_PROFILE", "realistic_iot")
+
         return HoneypotStatusResponse(
             enabled=self._enabled,
             running=self._is_running,
             bind_host=self.bind_host,
+            lan_ip=lan_ip,
+            decoy_profile=profile,
             services=services,
             total_events=total_events,
             high_severity_events=high_severity_events,

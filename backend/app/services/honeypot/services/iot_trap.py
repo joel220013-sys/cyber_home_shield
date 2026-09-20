@@ -1,10 +1,11 @@
-﻿"""Simulated IP Camera / RTSP Honeypot Trap."""
+"""Simulated IP Camera / RTSP Honeypot Trap."""
 
 import asyncio
 import logging
 from typing import Any, Callable, Dict, Optional
 import uuid
 
+from app.config import settings
 from app.models.enums import Protocol, Severity
 from app.services.honeypot.base import BaseHoneypotTrap, HoneypotTelemetryEvent
 from app.services.honeypot.isolation import (
@@ -43,7 +44,10 @@ class CameraDecoyTrap(BaseHoneypotTrap):
         """Start async TCP socket listener for Camera/RTSP requests."""
         if self._is_running:
             return
-        validated_host = validate_honeypot_bind_host(self.bind_host)
+        validated_host = validate_honeypot_bind_host(
+            self.bind_host,
+            allow_non_local=settings.HONEYPOT_ALLOW_NON_LOCAL,
+        )
         try:
             self._server = await asyncio.start_server(
                 self._handle_client_connection,
@@ -54,7 +58,8 @@ class CameraDecoyTrap(BaseHoneypotTrap):
             logger.info(f"Camera Honeypot Trap started on {validated_host}:{self.port}")
         except Exception as e:
             logger.warning(f"Could not bind Camera honeypot socket on port {self.port}: {e}. Operating in simulated mode.")
-            self._is_running = True
+            self._is_running = False
+            raise
 
     async def stop(self) -> None:
         """Stop TCP listener."""
@@ -103,11 +108,15 @@ class CameraDecoyTrap(BaseHoneypotTrap):
 
             http_body = resp.get("response_body", "OK")
             status_code = resp.get("status_code", 200)
+            status_text = "OK" if status_code == 200 else ("Unauthorized" if status_code == 401 else ("Service Unavailable" if status_code == 503 else "Error"))
+            banner = getattr(settings, "HONEYPOT_CAMERA_BANNER", "Boa/0.94.14rc21")
+            auth_header = 'WWW-Authenticate: Basic realm="IPCamera"\r\n' if status_code == 401 else ""
             http_response = (
-                f"HTTP/1.1 {status_code} OK\r\n"
+                f"HTTP/1.1 {status_code} {status_text}\r\n"
                 f"Content-Type: text/plain; charset=utf-8\r\n"
                 f"Content-Length: {len(http_body.encode('utf-8'))}\r\n"
-                f"Server: CyberHomeShield-SimulatedCamera/1.0\r\n"
+                f"Server: {banner}\r\n"
+                f"{auth_header}"
                 f"Connection: close\r\n\r\n"
                 f"{http_body}"
             )

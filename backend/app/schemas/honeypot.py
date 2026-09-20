@@ -1,4 +1,4 @@
-﻿"""Pydantic schemas for Honeypot & Deception Subsystem."""
+"""Pydantic schemas for Honeypot & Deception Subsystem."""
 
 import uuid
 from datetime import datetime
@@ -23,6 +23,8 @@ class HoneypotStatusResponse(BaseModel):
     enabled: bool = Field(..., description="Global honeypot feature flag status")
     running: bool = Field(..., description="Whether honeypot traps are currently active")
     bind_host: str = Field(..., description="Bound IP address for honeypot listeners")
+    lan_ip: Optional[str] = Field(default="127.0.0.1", description="Resolved reachable LAN IPv4 address")
+    decoy_profile: Optional[str] = Field(default="realistic_iot", description="Active deception banner profile")
     services: List[HoneypotServiceStatus] = Field(default_factory=list)
     total_events: int = Field(default=0, description="Total captured deception events")
     high_severity_events: int = Field(default=0, description="Count of HIGH and CRITICAL severity events")

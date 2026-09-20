@@ -1,7 +1,8 @@
-﻿"""AI Security Advisor application service coordinating models, database, and telemetry."""
+"""AI Security Advisor application service coordinating models, database, and telemetry."""
 
+import time
 import uuid as _uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -22,6 +23,9 @@ from app.services.ai.schemas import (
     TelemetryExplanation,
 )
 from app.services.risk_engine.calculator import RiskCalculator
+
+_HONEYPOT_EXPLAIN_CACHE: Dict[str, Tuple[float, HoneypotAnalysisResponse]] = {}
+_CACHE_TTL_SECONDS = 600.0  # 10 minutes cache
 
 
 class AIService:
@@ -162,6 +166,23 @@ class AIService:
                 model_used="NVIDIA Nemotron (Unavailable)",
             )
 
+        # Check TTL cache to prevent flooding LLM on repeated scans
+        cache_key = f"{event.honeypot_id}:{event.interaction_type}:{event.endpoint}"
+        now = time.time()
+        if cache_key in _HONEYPOT_EXPLAIN_CACHE:
+            ts, cached_resp = _HONEYPOT_EXPLAIN_CACHE[cache_key]
+            if now - ts < _CACHE_TTL_SECONDS:
+                return HoneypotAnalysisResponse(
+                    event_id=event.id,
+                    summary=cached_resp.summary,
+                    pattern_detected=cached_resp.pattern_detected,
+                    severity=cached_resp.severity,
+                    defensive_implications=cached_resp.defensive_implications,
+                    recommended_actions=cached_resp.recommended_actions,
+                    confidence=cached_resp.confidence,
+                    model_used=cached_resp.model_used,
+                )
+
         # Fetch recent events from same source IP for context
         recent_query = (
             select(HoneypotEvent)
@@ -199,10 +220,14 @@ class AIService:
             for r in recent_events
         ]
 
-        return await self.advisor.explain_honeypot_event(
+        result = await self.advisor.explain_honeypot_event(
             event_data=event_dict,
             recent_events=recent_list,
         )
+        if result and result.confidence > 0:
+            _HONEYPOT_EXPLAIN_CACHE[cache_key] = (now, result)
+
+        return result
 
     async def triage_event(
         self,

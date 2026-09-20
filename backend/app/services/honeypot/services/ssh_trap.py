@@ -1,10 +1,11 @@
-﻿"""Simulated SSH Honeypot Trap."""
+"""Simulated SSH Honeypot Trap."""
 
 import asyncio
 import logging
 from typing import Any, Callable, Dict, Optional
 import uuid
 
+from app.config import settings
 from app.models.enums import Protocol, Severity
 from app.services.honeypot.base import BaseHoneypotTrap, HoneypotTelemetryEvent
 from app.services.honeypot.isolation import (
@@ -27,6 +28,7 @@ class SshDecoyTrap(BaseHoneypotTrap):
         port: int = 2222,
         bind_host: str = "127.0.0.1",
         on_event_callback: Optional[Callable[[HoneypotTelemetryEvent], Any]] = None,
+        banner: Optional[str] = None,
     ) -> None:
         super().__init__(
             service_id=service_id,
@@ -34,17 +36,22 @@ class SshDecoyTrap(BaseHoneypotTrap):
             service_type="SSH",
             port=port,
             bind_host=bind_host,
-            description="Simulated SSH service banner with connection telemetry (SSH-2.0-CyberHomeShield-Simulated)",
+            description="Simulated embedded Dropbear SSH service decoy",
             on_event_callback=on_event_callback,
         )
         self._server: Optional[asyncio.Server] = None
-        self.banner = "SSH-2.0-CyberHomeShield-Simulated\r\n"
+        default_banner = getattr(settings, "HONEYPOT_SSH_BANNER", "SSH-2.0-dropbear_2020.81")
+        chosen_banner = (banner or default_banner).strip()
+        self.banner = f"{chosen_banner}\r\n"
 
     async def start(self) -> None:
         """Start async TCP socket listener for SSH probes."""
         if self._is_running:
             return
-        validated_host = validate_honeypot_bind_host(self.bind_host)
+        validated_host = validate_honeypot_bind_host(
+            self.bind_host,
+            allow_non_local=settings.HONEYPOT_ALLOW_NON_LOCAL,
+        )
         try:
             self._server = await asyncio.start_server(
                 self._handle_client_connection,
@@ -55,7 +62,8 @@ class SshDecoyTrap(BaseHoneypotTrap):
             logger.info(f"SSH Honeypot Trap started on {validated_host}:{self.port}")
         except Exception as e:
             logger.warning(f"Could not bind SSH honeypot socket on port {self.port}: {e}. Operating in simulated mode.")
-            self._is_running = True
+            self._is_running = False
+            raise
 
     async def stop(self) -> None:
         """Stop TCP listener."""

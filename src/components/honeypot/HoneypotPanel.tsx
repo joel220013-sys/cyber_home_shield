@@ -23,6 +23,11 @@ import {
   X,
   ExternalLink,
   ChevronRight,
+  Globe,
+  Copy,
+  Check,
+  Info,
+  Network,
 } from 'lucide-react';
 import { honeypotService } from '../../services/honeypotService';
 import {
@@ -61,6 +66,12 @@ export const HoneypotPanel: React.FC<HoneypotPanelProps> = ({ onOpenAdvisorWithP
   const [selectedEventForAnalysis, setSelectedEventForAnalysis] = useState<HoneypotEvent | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState<boolean>(false);
 
+  // Network Scope & Port Proxying State
+  const [bindScope, setBindScope] = useState<'lan' | 'local'>('lan');
+  const [copiedPortCmd, setCopiedPortCmd] = useState<boolean>(false);
+  const [copiedLanUrl, setCopiedLanUrl] = useState<boolean>(false);
+  const [showPortProxyGuide, setShowPortProxyGuide] = useState<boolean>(false);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -88,7 +99,8 @@ export const HoneypotPanel: React.FC<HoneypotPanelProps> = ({ onOpenAdvisorWithP
       if (status.running) {
         await honeypotService.stop();
       } else {
-        await honeypotService.start('127.0.0.1');
+        const targetHost = bindScope === 'lan' ? '0.0.0.0' : '127.0.0.1';
+        await honeypotService.start(targetHost);
       }
       await fetchData();
     } catch (err: any) {
@@ -193,7 +205,37 @@ export const HoneypotPanel: React.FC<HoneypotPanelProps> = ({ onOpenAdvisorWithP
             </div>
           </div>
 
-          <div className="flex items-center gap-3 self-start md:self-auto">
+          <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+            {/* Listening Scope Selector */}
+            {!status?.running && (
+              <div className="flex items-center rounded-lg border border-slate-700 bg-slate-800 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBindScope('lan')}
+                  className={`px-2.5 py-1 rounded font-medium transition ${
+                    bindScope === 'lan'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Listens on 0.0.0.0 to catch probes from other devices on your local Wi-Fi/LAN"
+                >
+                  LAN (0.0.0.0)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBindScope('local')}
+                  className={`px-2.5 py-1 rounded font-medium transition ${
+                    bindScope === 'local'
+                      ? 'bg-slate-700 text-slate-100'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Listens only on 127.0.0.1 loopback"
+                >
+                  Localhost
+                </button>
+              </div>
+            )}
+
             <button
               onClick={fetchData}
               disabled={loading}
@@ -228,37 +270,112 @@ export const HoneypotPanel: React.FC<HoneypotPanelProps> = ({ onOpenAdvisorWithP
           </div>
         </div>
 
-        {/* Isolation Guarantee Badges */}
+        {/* Isolation & Network Status Badges */}
         <div className="mt-5 pt-4 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-          <div className="flex items-center gap-2 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
-            <Lock className="h-4 w-4 text-cyan-400 shrink-0" />
-            <div>
-              <span className="text-slate-400 block text-[10px]">Bind Interface</span>
-              <span className="font-mono font-medium text-slate-200">{status?.bind_host || '127.0.0.1'} (Loopback)</span>
+          <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-cyan-400 shrink-0" />
+              <div>
+                <span className="text-slate-400 block text-[10px]">Reachable Endpoint</span>
+                <span className="font-mono font-medium text-slate-200 text-[11px]">
+                  {status?.running
+                    ? status.bind_host === '0.0.0.0'
+                      ? `${status.lan_ip || 'LAN'}:8088`
+                      : '127.0.0.1:8088'
+                    : 'Offline'}
+                </span>
+              </div>
             </div>
+            {status?.running && (
+              <button
+                onClick={() => {
+                  const url = `http://${status.bind_host === '0.0.0.0' ? status.lan_ip || '127.0.0.1' : '127.0.0.1'}:8088/`;
+                  navigator.clipboard.writeText(url);
+                  setCopiedLanUrl(true);
+                  setTimeout(() => setCopiedLanUrl(false), 2000);
+                }}
+                className="text-slate-400 hover:text-cyan-300 p-1"
+                title="Copy decoy HTTP URL"
+              >
+                {copiedLanUrl ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            )}
           </div>
+
           <div className="flex items-center gap-2 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
             <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
             <div>
-              <span className="text-slate-400 block text-[10px]">Pivot Protection</span>
-              <span className="font-medium text-slate-200">Strict Sandbox Isolation</span>
+              <span className="text-slate-400 block text-[10px]">Decoy Profile</span>
+              <span className="font-medium text-slate-200">Stealth IoT (Dropbear/Boa)</span>
             </div>
           </div>
+
           <div className="flex items-center gap-2 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
             <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />
             <div>
-              <span className="text-slate-400 block text-[10px]">Credential Handling</span>
+              <span className="text-slate-400 block text-[10px]">Credential Defense</span>
               <span className="font-medium text-slate-200">Zero Storage / Auto-Redact</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
-            <Sparkles className="h-4 w-4 text-purple-400 shrink-0" />
-            <div>
-              <span className="text-slate-400 block text-[10px]">AI Security Advisor</span>
-              <span className="font-medium text-purple-300">CipherX</span>
+
+          <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
+            <div className="flex items-center gap-2">
+              <Network className="h-4 w-4 text-purple-400 shrink-0" />
+              <div>
+                <span className="text-slate-400 block text-[10px]">Standard Ports (80/22)</span>
+                <span className="font-medium text-purple-300">Port Proxy Helper</span>
+              </div>
             </div>
+            <button
+              onClick={() => setShowPortProxyGuide(!showPortProxyGuide)}
+              className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold px-2 py-0.5 rounded bg-cyan-950/40 border border-cyan-800/50 transition"
+            >
+              {showPortProxyGuide ? 'Close' : 'Setup'}
+            </button>
           </div>
         </div>
+
+        {/* Standard Port Forwarding (Port 80/22) Guide */}
+        {showPortProxyGuide && (
+          <div className="mt-4 p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 text-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-cyan-300">
+                <Network className="h-4 w-4" />
+                <span>Expose Standard Ports (80 & 22) to Honeypot Traps</span>
+              </div>
+              <button
+                onClick={() => setShowPortProxyGuide(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p className="text-slate-300 leading-relaxed">
+              Operating systems restrict unprivileged applications from binding directly to ports below 1024. Run this command in an Administrator PowerShell to forward standard port 80 & 22 scans straight to your honeypot traps:
+            </p>
+            <div className="relative rounded-lg bg-slate-950 p-3 font-mono text-[11px] text-slate-300 border border-slate-800">
+              <pre className="overflow-x-auto whitespace-pre-wrap">{`# Windows Administrator PowerShell:
+netsh interface portproxy add v4tov4 listenport=80 listenaddress=0.0.0.0 connectport=8088 connectaddress=127.0.0.1
+netsh interface portproxy add v4tov4 listenport=22 listenaddress=0.0.0.0 connectport=2222 connectaddress=127.0.0.1`}</pre>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    `netsh interface portproxy add v4tov4 listenport=80 listenaddress=0.0.0.0 connectport=8088 connectaddress=127.0.0.1\nnetsh interface portproxy add v4tov4 listenport=22 listenaddress=0.0.0.0 connectport=2222 connectaddress=127.0.0.1`
+                  );
+                  setCopiedPortCmd(true);
+                  setTimeout(() => setCopiedPortCmd(false), 2500);
+                }}
+                className="absolute top-2 right-2 flex items-center gap-1 rounded bg-slate-800 hover:bg-slate-700 px-2 py-1 text-[10px] text-cyan-300 border border-slate-700 transition"
+              >
+                {copiedPortCmd ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                <span>{copiedPortCmd ? 'Copied' : 'Copy Commands'}</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              To remove port forwarding later: <code className="text-slate-300 bg-slate-900 px-1 py-0.5 rounded">netsh interface portproxy delete v4tov4 listenport=80 listenaddress=0.0.0.0</code>
+            </p>
+          </div>
+        )}
       </div>
 
       {/* 2. Deception Trap Services Grid */}

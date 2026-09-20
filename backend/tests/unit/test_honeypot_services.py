@@ -1,4 +1,4 @@
-﻿"""Unit tests for Honeypot Trap Services (HTTP, SSH, Camera)."""
+"""Unit tests for Honeypot Trap Services (HTTP, SSH, Camera)."""
 
 import pytest
 from app.models.enums import Protocol, Severity
@@ -65,7 +65,7 @@ async def test_ssh_trap_interaction_handling():
         payload="SSH-2.0-OpenSSH_8.2p1",
     )
 
-    assert "SSH-2.0-CyberHomeShield-Simulated" in res["response_body"]
+    assert "SSH-2.0-" in res["response_body"]
     assert res["interaction_type"] == "ssh_connection"
     assert trap.interaction_count == 1
 

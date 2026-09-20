@@ -18,7 +18,7 @@ export const aiService = {
     return await apiRequest<AIChatResponse>('/api/v1/ai/chat', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }, 25000);
+    }, 50000);
   },
 
   /**
@@ -28,7 +28,7 @@ export const aiService = {
     return await apiRequest<AITriageResponse>('/api/v1/ai/triage', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }, 25000);
+    }, 50000);
   },
 
   /**
@@ -37,7 +37,7 @@ export const aiService = {
   async explainDeviceRisk(deviceId: string): Promise<DeviceRiskExplanation> {
     return await apiRequest<DeviceRiskExplanation>(`/api/v1/ai/explain-device/${deviceId}`, {
       method: 'POST',
-    });
+    }, 50000);
   },
 
   /**
@@ -46,7 +46,7 @@ export const aiService = {
   async explainFinding(findingId: string): Promise<FindingExplanation> {
     return await apiRequest<FindingExplanation>(`/api/v1/ai/explain-finding/${findingId}`, {
       method: 'POST',
-    });
+    }, 50000);
   },
 
   /**
@@ -56,6 +56,6 @@ export const aiService = {
     return await apiRequest<HardeningGuideResponse>('/api/v1/ai/hardening-guide', {
       method: 'POST',
       body: JSON.stringify(payload),
-    });
+    }, 50000);
   },
 };

@@ -68,7 +68,7 @@ export const honeypotService = {
     try {
       return await apiRequest<HoneypotAnalysisResponse>(`/api/v1/honeypot/analyze/${id}`, {
         method: 'POST',
-      });
+      }, 50000);
     } catch {
       return {
         event_id: id,

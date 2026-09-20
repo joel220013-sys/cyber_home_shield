@@ -411,6 +411,8 @@ export interface HoneypotStatusResponse {
   enabled: boolean;
   running: boolean;
   bind_host: string;
+  lan_ip?: string;
+  decoy_profile?: string;
   services: HoneypotTrapService[];
   total_captured_events: number;
   high_severity_events: number;

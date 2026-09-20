@@ -1,4 +1,4 @@
-﻿"""NVIDIA Nemotron AI Security Advisor client using OpenAI-compatible interface."""
+"""NVIDIA Nemotron AI Security Advisor client using OpenAI-compatible interface."""
 
 import json
 import logging
@@ -64,7 +64,7 @@ class NemotronClient(BaseAIAdvisor):
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: float = 20.0,
+        timeout: Optional[float] = None,
     ):
         self.api_key = (
             settings.NVIDIA_API_KEY
@@ -82,7 +82,11 @@ class NemotronClient(BaseAIAdvisor):
             or settings.NVIDIA_MODEL
         )
 
-        self.timeout = timeout
+        self.timeout = (
+            timeout
+            if timeout is not None
+            else getattr(settings, "NVIDIA_TIMEOUT", 45.0)
+        )
 
         self._client: Optional[AsyncOpenAI] = None
 
@@ -129,20 +133,21 @@ class NemotronClient(BaseAIAdvisor):
     # NVIDIA request options
     # ==================================================================
 
-    @staticmethod
-    def _thinking_options() -> Dict[str, Any]:
+    def _thinking_options(self) -> Dict[str, Any]:
         """
         Disable Nemotron reasoning/thinking output.
 
         This keeps application responses focused on the final answer
         and prevents reasoning content from consuming the output budget.
+        Only applied to Nemotron models to avoid rejecting parameters on other architectures.
         """
-
-        return {
-            "chat_template_kwargs": {
-                "enable_thinking": False,
+        if "nemotron" in (self.model or "").lower():
+            return {
+                "chat_template_kwargs": {
+                    "enable_thinking": False,
+                }
             }
-        }
+        return {}
 
     # ==================================================================
     # Response normalization
@@ -1268,7 +1273,7 @@ class NemotronClient(BaseAIAdvisor):
                     model=self.model,
                     messages=messages,
                     temperature=0.3,
-                    max_tokens=MAX_OUTPUT_TOKENS,
+                    max_tokens=4096,
                     extra_body=self._thinking_options(),
                 )
             )

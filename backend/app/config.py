@@ -118,6 +118,8 @@ class Settings(BaseSettings):
         "https://integrate.api.nvidia.com/v1"
     )
 
+    NVIDIA_TIMEOUT: float = 45.0
+
     # =========================================================================
     # DEFENSIVE DISCOVERY
     # =========================================================================
@@ -186,6 +188,14 @@ class Settings(BaseSettings):
     HONEYPOT_SSH_PORT: int = 2222
 
     HONEYPOT_CAMERA_PORT: int = 8554
+
+    HONEYPOT_DECOY_PROFILE: str = "realistic_iot"
+
+    HONEYPOT_HTTP_BANNER: str = "mini_httpd/1.30 01Jan2018"
+
+    HONEYPOT_SSH_BANNER: str = "SSH-2.0-dropbear_2020.81"
+
+    HONEYPOT_CAMERA_BANNER: str = "Boa/0.94.14rc21"
 
     # =========================================================================
     # DATABASE URL VALIDATION
