@@ -41,6 +41,14 @@ class DiscoveredNetworkDevice(BaseModel):
     device_role: str = "Unknown"
     posture_evidence: List[PostureEvidence] = Field(default_factory=list)
 
+    # Nmap enrichment fields
+    hop_count: Optional[int] = None
+    """Estimated number of network hops to this device (derived from TTL)."""
+    ttl: Optional[int] = None
+    """Raw observed TTL value from the ICMP reply."""
+    os_guess: Optional[str] = None
+    """Best-effort OS fingerprint from nmap (empty when unavailable)."""
+
 
 class NetworkDiscoveryResponse(BaseModel):
     """Bounded discovery result for the detector-provided network."""
@@ -50,3 +58,7 @@ class NetworkDiscoveryResponse(BaseModel):
     status: str
     network: Optional[str] = None
     devices: List[DiscoveredNetworkDevice]
+    total_devices: int = 0
+    """Total number of devices discovered (convenience field = len(devices))."""
+    scan_method: str = "arp_icmp"
+    """Scan method used: 'arp_icmp', 'nmap', or 'arp_icmp+nmap'."""

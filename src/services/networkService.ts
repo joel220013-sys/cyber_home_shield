@@ -1,7 +1,7 @@
 import { apiRequest } from './api';
 import { NetworkDiscoveryResponse, RouterDetectionResponse, RouterHealthResponse } from '../types';
 
-export const NETWORK_DISCOVERY_TIMEOUT_MS = 35000;
+export const NETWORK_DISCOVERY_TIMEOUT_MS = 60000;
 
 export const networkService = {
   async detectRouter(): Promise<RouterDetectionResponse> {

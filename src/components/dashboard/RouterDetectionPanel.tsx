@@ -1,10 +1,29 @@
 import React, { useState } from 'react';
-import { CheckCircle, Loader2, Router, ShieldAlert } from 'lucide-react';
+import { CheckCircle, Loader2, Router, ShieldAlert, Wifi, Activity, Layers } from 'lucide-react';
 import { Card } from '../common/Card';
 import { networkService } from '../../services/networkService';
 import { NetworkDiscoveryResponse, RouterDetectionResponse, RouterHealthResponse } from '../../types';
 
-export const RouterDetectionPanel: React.FC = () => {
+/** Return a Tailwind colour class for the hop count. */
+function hopColour(hops: number | null): string {
+  if (hops === null) return 'text-slate-500';
+  if (hops <= 1) return 'text-emerald-300';
+  if (hops <= 2) return 'text-amber-300';
+  return 'text-red-300';
+}
+
+/** Return a Tailwind colour class for the security classification. */
+function classColour(cls: string): string {
+  if (cls === 'SUSPICIOUS') return 'text-red-300';
+  if (cls === 'KNOWN') return 'text-emerald-300';
+  return 'text-amber-300';
+}
+
+interface RouterDetectionPanelProps {
+  onDiscovered?: () => void;
+}
+
+export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDiscovered }) => {
   const [detection, setDetection] = useState<RouterDetectionResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -47,7 +66,9 @@ export const RouterDetectionPanel: React.FC = () => {
     setDiscoveryLoading(true);
     setDiscoveryError(false);
     try {
-      setDiscovery(await networkService.discoverDevices());
+      const res = await networkService.discoverDevices();
+      setDiscovery(res);
+      onDiscovered?.();
     } catch {
       setDiscovery(null);
       setDiscoveryError(true);
@@ -77,8 +98,8 @@ export const RouterDetectionPanel: React.FC = () => {
             disabled={discoveryLoading}
             className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-950/30 px-3 py-2 text-xs font-semibold text-cyan-200 transition-colors hover:bg-cyan-900/40 disabled:cursor-wait disabled:opacity-60"
           >
-            {discoveryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Router className="h-4 w-4" />}
-            {discoveryLoading ? 'Discovering...' : 'Discover Devices'}
+            {discoveryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
+            {discoveryLoading ? 'Scanning network...' : 'Discover Devices'}
           </button>
           <button
             type="button"
@@ -141,27 +162,139 @@ export const RouterDetectionPanel: React.FC = () => {
         </div>
       )}
 
+      {/* ── Discovery scanning indicator ── */}
+      {discoveryLoading && (
+        <div className="mt-4 border-t border-slate-800 pt-4">
+          <div className="flex items-center gap-2 text-sm text-cyan-300">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Running ARP + Nmap scan — this may take up to 30 s…</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Discovery results ── */}
       {discovery && !discoveryLoading && (
-        <div className="mt-4 border-t border-slate-800 pt-3 text-sm">
-          <p className="font-semibold text-cyan-200">
-            {discovery.status === 'completed' ? 'Completed' : 'Discovery unavailable'}
-          </p>
-          {discovery.network && <p className="mt-1 text-slate-300">Network: <span className="font-mono text-slate-100">{discovery.network}</span></p>}
-          <p className="text-slate-300">Devices found: <span className="font-mono text-slate-100">{discovery.devices.length}</span></p>
+        <div className="mt-4 border-t border-slate-800 pt-4 text-sm">
+
+          {/* Header row: status + stats badges */}
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <span className={`font-semibold ${discovery.status === 'completed' ? 'text-cyan-200' : 'text-amber-300'}`}>
+              {discovery.status === 'completed' ? '✓ Scan Completed' : 'Discovery unavailable'}
+            </span>
+
+            {/* Device count badge */}
+            <span className="inline-flex items-center gap-1 rounded-full bg-cyan-900/50 px-2.5 py-0.5 text-xs font-semibold text-cyan-200 ring-1 ring-cyan-700/50">
+              <Wifi className="h-3 w-3" />
+              {discovery.total_devices ?? discovery.devices.length} device{(discovery.total_devices ?? discovery.devices.length) !== 1 ? 's' : ''} found
+            </span>
+
+            {/* Scan method badge */}
+            {discovery.scan_method && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-0.5 text-xs text-slate-400 ring-1 ring-slate-700">
+                <Activity className="h-3 w-3" />
+                {discovery.scan_method}
+              </span>
+            )}
+
+            {/* Network badge */}
+            {discovery.network && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-0.5 text-xs text-slate-400 ring-1 ring-slate-700">
+                <Layers className="h-3 w-3" />
+                {discovery.network}
+              </span>
+            )}
+          </div>
+
           {discovery.devices.length === 0 ? (
-            <p className="mt-2 text-slate-500">No devices found</p>
+            <p className="text-slate-500">No devices found on this subnet.</p>
           ) : (
-            <div className="mt-3 overflow-x-auto">
+            <div className="overflow-x-auto rounded-lg border border-slate-800">
               <table className="w-full text-left text-xs">
-                <thead className="text-slate-500"><tr><th className="pb-2 pr-3">IP</th><th className="pb-2 pr-3">Hostname / Vendor</th><th className="pb-2 pr-3">Role</th><th className="pb-2 pr-3">Security posture</th><th className="pb-2">Evidence</th></tr></thead>
-                <tbody className="text-slate-300">{discovery.devices.map((device) => <tr key={device.ip} className="border-t border-slate-800 align-top"><td className="py-2 pr-3 font-mono">{device.ip}<div className="text-[10px] text-slate-500">{device.mac ?? 'MAC unavailable'} · {device.mac_type}</div></td><td className="py-2 pr-3">{device.hostname ?? 'Hostname unresolved'}<div className="text-[10px] text-slate-500">{device.vendor ?? (device.mac_type === 'locally_administered' ? 'Vendor unavailable because MAC is locally administered' : 'Vendor lookup returned no manufacturer')}</div></td><td className="py-2 pr-3">{device.device_role}</td><td className="py-2 pr-3"><span className={device.identity_classification === 'SUSPICIOUS' ? 'text-red-300' : device.identity_classification === 'KNOWN' ? 'text-emerald-300' : 'text-amber-300'}>{device.identity_classification}</span><div className="text-[10px] text-slate-500">{device.reason}</div></td><td className="py-2 text-[10px] text-slate-400">{device.posture_evidence.length ? device.posture_evidence.map((item, index) => <div key={`${item.source}-${index}`}>{item.category}: {item.detail}</div>) : device.evidence_state}</td></tr>)}</tbody>
+                <thead className="bg-slate-900/60 text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">IP Address</th>
+                    <th className="px-3 py-2">MAC Address</th>
+                    <th className="px-3 py-2">Hostname / Vendor</th>
+                    <th className="px-3 py-2">Hops</th>
+                    <th className="px-3 py-2">OS Guess</th>
+                    <th className="px-3 py-2">Role</th>
+                    <th className="px-3 py-2">Posture</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 text-slate-300">
+                  {discovery.devices.map((device) => (
+                    <tr key={device.ip} className="align-top transition-colors hover:bg-slate-800/30">
+
+                      {/* IP */}
+                      <td className="px-3 py-2.5">
+                        <span className="font-mono text-slate-100">{device.ip}</span>
+                        <div className="mt-0.5 text-[10px] text-slate-500">{device.status}</div>
+                      </td>
+
+                      {/* MAC */}
+                      <td className="px-3 py-2.5">
+                        <span className="font-mono">{device.mac ?? '—'}</span>
+                        {device.mac_type !== 'unknown' && (
+                          <div className="mt-0.5 text-[10px] text-slate-500">{device.mac_type}</div>
+                        )}
+                      </td>
+
+                      {/* Hostname / Vendor */}
+                      <td className="px-3 py-2.5">
+                        <span>{device.hostname ?? <span className="italic text-slate-500">unresolved</span>}</span>
+                        {device.vendor && (
+                          <div className="mt-0.5 text-[10px] text-slate-500">{device.vendor}</div>
+                        )}
+                      </td>
+
+                      {/* Hops */}
+                      <td className="px-3 py-2.5">
+                        {device.hop_count !== null && device.hop_count !== undefined ? (
+                          <div className="flex flex-col">
+                            <span className={`font-bold ${hopColour(device.hop_count)}`}>
+                              {device.hop_count} hop{device.hop_count !== 1 ? 's' : ''}
+                            </span>
+                            {device.ttl !== null && device.ttl !== undefined && (
+                              <span className="text-[10px] text-slate-500">TTL {device.ttl}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </td>
+
+                      {/* OS Guess */}
+                      <td className="px-3 py-2.5">
+                        {device.os_guess
+                          ? <span className="text-slate-300">{device.os_guess}</span>
+                          : <span className="text-slate-600">—</span>
+                        }
+                      </td>
+
+                      {/* Role */}
+                      <td className="px-3 py-2.5 text-slate-400">{device.device_role}</td>
+
+                      {/* Posture */}
+                      <td className="px-3 py-2.5">
+                        <span className={`font-semibold ${classColour(device.identity_classification)}`}>
+                          {device.identity_classification}
+                        </span>
+                        <div className="mt-0.5 text-[10px] text-slate-500">{device.reason}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
           )}
         </div>
       )}
 
-      {discoveryError && !discoveryLoading && <p className="mt-4 border-t border-slate-800 pt-3 text-sm text-amber-300">Error discovering devices</p>}
+      {discoveryError && !discoveryLoading && (
+        <p className="mt-4 border-t border-slate-800 pt-3 text-sm text-amber-300">
+          Error discovering devices — check that the backend is running.
+        </p>
+      )}
     </Card>
   );
 };

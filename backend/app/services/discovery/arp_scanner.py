@@ -323,7 +323,18 @@ class SafeHostDiscoverer:
         except (OSError, subprocess.SubprocessError, asyncio.TimeoutError):
             return False
 
-        return completed.returncode == 0
+        if completed.returncode != 0:
+            return False
+
+        stdout_lower = (completed.stdout or "").lower()
+        if "unreachable" in stdout_lower or "timed out" in stdout_lower:
+            return False
+
+        # On Windows, a true ICMP Echo Reply explicitly contains 'ttl='
+        if os.name == "nt" and "ttl=" not in stdout_lower:
+            return False
+
+        return True
 
     @staticmethod
     def get_local_ipv4_addresses() -> set[str]:

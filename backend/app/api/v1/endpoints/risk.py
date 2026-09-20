@@ -402,34 +402,19 @@ async def get_network_posture(
     device_results: List[DeviceRiskResult] = []
 
     for device in devices:
+        active_findings = [
+            f for f in device.findings
+            if f.status in (FindingStatus.OPEN, FindingStatus.IN_PROGRESS)
+        ]
 
-        active_findings = await _generate_and_persist_findings(
-            db=db,
-            device=device,
+        risk_result = RiskCalculator.calculate_device_risk(
+            device_id=device.id,
+            open_ports=list(device.ports),
+            events=list(device.events),
+            existing_findings=active_findings,
         )
 
-        risk_result = (
-            RiskCalculator.calculate_device_risk(
-                device_id=device.id,
-                open_ports=device.ports,
-                events=device.events,
-                existing_findings=active_findings,
-            )
-        )
-
-        device_results.append(
-            risk_result
-        )
-
-    # ========================================================================
-    # 5. Commit finding reconciliation
-    # ========================================================================
-
-    await db.commit()
-
-    # ========================================================================
-    # 6. Calculate network posture
-    # ========================================================================
+        device_results.append(risk_result)
 
     return RiskCalculator.calculate_network_posture(
         device_results

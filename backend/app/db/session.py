@@ -35,10 +35,19 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
+            # Endpoint raised — rollback and let the exception propagate.
             await session.rollback()
             raise
+        else:
+            # Endpoint succeeded — try to commit; if the session was left in a
+            # rolled-back state (e.g. by an internal flush error that the
+            # endpoint caught), just rollback silently so the connection is
+            # returned cleanly to the pool.
+            try:
+                await session.commit()
+            except Exception:
+                await session.rollback()
         finally:
             await session.close()
 

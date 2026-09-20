@@ -15,3 +15,4 @@ aiosqlite>=0.20.0
 mac-vendor-lookup==0.1.15
 openai>=1.0.0
 scapy>=2.5.0
+python-nmap>=0.7.1

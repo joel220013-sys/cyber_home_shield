@@ -23,10 +23,12 @@ from app.schemas.network_discovery import (
 )
 from app.services.discovery.service import DiscoveryService
 from app.services.discovery.arp_scanner import SafeHostDiscoverer
+from app.services.discovery.nmap_scanner import NmapDeviceScanner
 from app.config import settings
 from app.core.exceptions import ScopeValidationError
 from app.services.network import LocalNetworkDetector
 from app.services.risk_engine.calculator import RiskCalculator
+from app.core.logging import logger
 
 router = APIRouter(prefix="/network", tags=["Local Network"])
 
@@ -85,12 +87,36 @@ async def discover_local_devices(
             current_user.authorized_network_scope,
             strict=False,
         )
-        if detected_network.version != 4 or not detected_network.subnet_of(authorized_network):
+        # If the detected network is RFC 1918 but doesn't match the stored
+        # authorized scope (e.g. user is on a 10.x hotspot but the default
+        # scope is 192.168.1.0/24), automatically update the scope so
+        # discovery isn't blocked by a stale default.
+        if detected_network.version != 4:
             return NetworkDiscoveryResponse(
                 status="unavailable",
                 network=network,
                 devices=[],
             )
+        if not detected_network.subnet_of(authorized_network):
+            from app.core.security import is_rfc1918_private_subnet
+            if is_rfc1918_private_subnet(network):
+                # Mark the new scope on the ORM object — get_db teardown
+                # commits it at the end of the request. We deliberately do
+                # NOT call db.commit() here to avoid poisoning the session
+                # before DiscoveryService does its own DB writes.
+                current_user.authorized_network_scope = network
+                logger.info(
+                    "Auto-updated authorized_network_scope to detected "
+                    "network %s for user %s.",
+                    network,
+                    current_user.id,
+                )
+            else:
+                return NetworkDiscoveryResponse(
+                    status="unavailable",
+                    network=network,
+                    devices=[],
+                )
     except (ValueError, TypeError):
         return NetworkDiscoveryResponse(
             status="unavailable",
@@ -100,44 +126,169 @@ async def discover_local_devices(
 
     service = DiscoveryService()
     try:
-        result, _ = await asyncio.wait_for(
-            service.execute_discovery(
-                target_str=network,
-                db=db,
-                owner_user_id=current_user.id,
-                max_hosts=min(settings.MAX_HOSTS, 254),
-                local_ip=detection.local_ip,
-            ),
-            timeout=settings.DISCOVERY_TIMEOUT,
+        # Run ARP/TCP discovery and Nmap scan concurrently for speed.
+        arp_task = asyncio.create_task(
+            asyncio.wait_for(
+                service.execute_discovery(
+                    target_str=network,
+                    db=db,
+                    owner_user_id=current_user.id,
+                    max_hosts=min(settings.MAX_HOSTS, 254),
+                    local_ip=detection.local_ip,
+                ),
+                timeout=settings.DISCOVERY_TIMEOUT,
+            )
         )
-    except (asyncio.TimeoutError, ScopeValidationError, ValueError):
+        nmap_task = asyncio.create_task(
+            NmapDeviceScanner.scan(
+                subnet=network,
+                timeout=min(settings.DISCOVERY_TIMEOUT, 30.0),
+            )
+        )
+        arp_result_raw, nmap_results = await asyncio.gather(
+            arp_task, nmap_task, return_exceptions=True
+        )
+    except Exception:
         return NetworkDiscoveryResponse(
             status="unavailable",
             network=network,
             devices=[],
+            total_devices=0,
         )
 
+    # Handle ARP task failure gracefully — rollback any partial flush that
+    # _sync_with_db may have left on the session before we short-circuit.
+    if isinstance(arp_result_raw, BaseException):
+        logger.error(
+            "[discover] ARP/discovery task failed: %s: %s",
+            type(arp_result_raw).__name__,
+            arp_result_raw,
+            exc_info=arp_result_raw,
+        )
+        await db.rollback()
+        # Fallback to Nmap results if available so user gets data immediately
+        if isinstance(nmap_results, list) and nmap_results:
+            logger.info("[discover] Falling back to %d Nmap results", len(nmap_results))
+            fallback_devices = []
+            for nmap_host in nmap_results:
+                is_gw = nmap_host.ip == detection.gateway_ip
+                fallback_devices.append(
+                    DiscoveredNetworkDevice(
+                        ip=nmap_host.ip,
+                        mac=nmap_host.mac or None,
+                        hostname=nmap_host.hostname or None,
+                        status="reachable",
+                        hop_count=nmap_host.hop_count,
+                        ttl=nmap_host.ttl,
+                        os_guess=nmap_host.os_guess or None,
+                        device_role="Gateway/Router" if is_gw else ("Host Machine" if nmap_host.ip == detection.local_ip else "Discovered Device"),
+                        identity_classification="Verified Managed" if is_gw else "Unclassified",
+                        reason="Discovered via Nmap ping scan",
+                    )
+                )
+            return NetworkDiscoveryResponse(
+                status="completed",
+                network=network,
+                devices=fallback_devices,
+                total_devices=len(fallback_devices),
+                scan_method="nmap",
+            )
+        return NetworkDiscoveryResponse(
+            status="unavailable",
+            network=network,
+            devices=[],
+            total_devices=0,
+        )
+    result, _ = arp_result_raw
+
+    # Build a fast IP-keyed lookup for nmap enrichment data.
+    nmap_lookup = (
+        NmapDeviceScanner.build_lookup(nmap_results)
+        if isinstance(nmap_results, list)
+        else {}
+    )
+    nmap_used = bool(nmap_lookup)
+
+    # Batch-prefetch DB devices and honeypots in 2 queries total instead of
+    # 2 round-trips to remote PostgreSQL per host.
+    all_ips = [host.ip_address for host in result.hosts]
+    devices_by_ip: dict[str, Device] = {}
+    honeypots_by_ip: dict[str, list[HoneypotEvent]] = {}
+    if all_ips:
+        try:
+            dev_res = await db.execute(
+                select(Device)
+                .where(Device.ip_address.in_(all_ips), Device.user_id == current_user.id)
+                .options(
+                    selectinload(Device.ports),
+                    selectinload(Device.findings),
+                    selectinload(Device.events),
+                )
+            )
+            for d in dev_res.scalars().all():
+                devices_by_ip[d.ip_address] = d
+
+            hp_res = await db.execute(
+                select(HoneypotEvent).where(
+                    HoneypotEvent.source_ip.in_(all_ips),
+                    HoneypotEvent.user_id == current_user.id,
+                )
+            )
+            for hp in hp_res.scalars().all():
+                honeypots_by_ip.setdefault(hp.source_ip, []).append(hp)
+        except Exception as exc:
+            logger.warning("[discover] Posture DB prefetch failed (non-fatal): %s", exc)
+
     devices = [
-        await _posture_device(
+        _posture_device(
             host,
-            db=db,
-            user_id=current_user.id,
             detection=detection,
+            device=devices_by_ip.get(host.ip_address),
+            honeypot_events=honeypots_by_ip.get(host.ip_address, []),
+            nmap_lookup=nmap_lookup,
         )
         for host in result.hosts
     ]
+
+    # Append any nmap-only hosts (not already found by ARP/TCP) at the end.
+    arp_ips = {d.ip for d in devices}
+    for ip, nmap_host in nmap_lookup.items():
+        if ip not in arp_ips:
+            devices.append(
+                DiscoveredNetworkDevice(
+                    ip=ip,
+                    mac=nmap_host.mac or None,
+                    hostname=nmap_host.hostname or None,
+                    status="reachable",
+                    hop_count=nmap_host.hop_count,
+                    ttl=nmap_host.ttl,
+                    os_guess=nmap_host.os_guess or None,
+                    device_role="Gateway/Router" if ip == detection.gateway_ip else "Discovered Device",
+                    identity_classification="Verified Managed" if ip == detection.gateway_ip else "Unclassified",
+                )
+            )
+
+    scan_method = (
+        "arp_icmp+nmap" if nmap_used and result.hosts else
+        "nmap" if nmap_used else
+        "arp_icmp"
+    )
+
     return NetworkDiscoveryResponse(
         status="completed",
         network=network,
         devices=devices,
+        total_devices=len(devices),
+        scan_method=scan_method,
     )
 
 
-async def _posture_device(
+def _posture_device(
     host,
-    db: AsyncSession,
-    user_id: uuid.UUID,
     detection,
+    device: Device | None = None,
+    honeypot_events: list[HoneypotEvent] | None = None,
+    nmap_lookup: dict | None = None,
 ) -> DiscoveredNetworkDevice:
     """Build posture identity and risk state from observed local evidence."""
 
@@ -165,25 +316,7 @@ async def _posture_device(
         or host.ip_address == detection.dhcp_server_ip
         or host.ip_address in detection.dns_server_ips
     )
-
-    device_result = await db.execute(
-        select(Device)
-        .where(Device.ip_address == host.ip_address, Device.user_id == user_id)
-        .options(
-            selectinload(Device.ports),
-            selectinload(Device.findings),
-            selectinload(Device.events),
-        )
-    )
-    device = device_result.scalar_one_or_none()
-    honeypot_result = await db.execute(
-        select(HoneypotEvent).where(
-            HoneypotEvent.source_ip == host.ip_address,
-            HoneypotEvent.user_id == user_id,
-        )
-    )
-    honeypot_events = honeypot_result.scalars().all()
-
+    honeypot_events = honeypot_events or []
     findings = list(device.findings) if device else []
     events = list(device.events) if device else []
     active_findings = [
@@ -281,6 +414,9 @@ async def _posture_device(
         else "Identity metadata available"
     )
 
+    # Pull nmap enrichment data for this IP if available.
+    nmap_entry = (nmap_lookup or {}).get(host.ip_address)
+
     return DiscoveredNetworkDevice(
         ip=host.ip_address,
         mac=host.mac_address or None,
@@ -298,4 +434,8 @@ async def _posture_device(
         reason=reason,
         device_role=device_role,
         posture_evidence=posture_evidence,
+        # Nmap enrichment — None when nmap is not installed.
+        hop_count=nmap_entry.hop_count if nmap_entry else None,
+        ttl=nmap_entry.ttl if nmap_entry else None,
+        os_guess=(nmap_entry.os_guess or None) if nmap_entry else None,
     )

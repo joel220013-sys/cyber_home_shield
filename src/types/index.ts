@@ -338,12 +338,18 @@ export interface DiscoveredNetworkDevice {
     source: string;
     detail: string;
   }>;
+  // Nmap enrichment
+  hop_count: number | null;
+  ttl: number | null;
+  os_guess: string | null;
 }
 
 export interface NetworkDiscoveryResponse {
   status: 'completed' | 'unavailable';
   network: string | null;
   devices: DiscoveredNetworkDevice[];
+  total_devices: number;
+  scan_method: string;
 }
 
 export interface DeviceRiskExplanation {

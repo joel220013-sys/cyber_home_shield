@@ -143,7 +143,7 @@ function DashboardContent() {
         <div className="space-y-6 animate-in fade-in duration-300">
           <ScopeBanner />
 
-          <RouterDetectionPanel />
+          <RouterDetectionPanel onDiscovered={handleRefreshAll} />
 
           {loadingPosture && !posture ? (
             <LoadingSpinner message="Evaluating network defensive posture..." />

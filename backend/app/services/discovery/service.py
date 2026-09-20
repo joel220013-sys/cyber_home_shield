@@ -341,13 +341,28 @@ class DiscoveryService:
         # ====================================================================
 
         if db is not None:
-            await self._sync_with_db(
-                db=db,
-                result=result,
-                target=target,
-                scan_job_id=scan_job_id,
-                owner_user_id=owner_user_id,
-            )
+            try:
+                await self._sync_with_db(
+                    db=db,
+                    result=result,
+                    target=target,
+                    scan_job_id=scan_job_id,
+                    owner_user_id=owner_user_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # DB sync is best-effort — a write failure (RLS, connection
+                # drop, constraint) must not abort the discovery scan.
+                # Roll back the failed transaction so the session stays clean.
+                from app.core.logging import logger as _logger
+                _logger.warning(
+                    "[discovery] DB sync failed (scan result still returned): %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
 
         return result, None
 
