@@ -29,12 +29,13 @@
    - [E. CipherX AI Security Advisor (Llama 3.2 / Nemotron)](#e-cipherx-ai-security-advisor-llama-32--nemotron)
 6. [Local Installation & Setup Guide](#6-local-installation--setup-guide)
 7. [Configuration Reference (`.env`)](#7-configuration-reference-env)
-8. [Windows PortProxy Setup Guide](#8-windows-portproxy-setup-guide)
-9. [Testing & Quality Verification](#9-testing--quality-verification)
-10. [Complete API Endpoint Reference](#10-complete-api-endpoint-reference)
-11. [Academic Presentation & Report Artifacts](#11-academic-presentation--report-artifacts)
-12. [Security Boundaries & Responsible Use](#12-security-boundaries--responsible-use)
-13. [License & Acknowledgments](#13-license--acknowledgments)
+8. [Real-Time Cloud & Edge Deployment (Vercel + Cloudflare Tunnel)](#8-real-time-cloud--edge-deployment-vercel--cloudflare-tunnel)
+9. [Windows PortProxy Setup Guide](#9-windows-portproxy-setup-guide)
+10. [Testing & Quality Verification](#10-testing--quality-verification)
+11. [Complete API Endpoint Reference](#11-complete-api-endpoint-reference)
+12. [Academic Presentation & Report Artifacts](#12-academic-presentation--report-artifacts)
+13. [Security Boundaries & Responsible Use](#13-security-boundaries--responsible-use)
+14. [License & Acknowledgments](#14-license--acknowledgments)
 
 ---
 
@@ -149,6 +150,16 @@ Modern residential and small-office networks have become densely populated ecosy
               │   Alembic DB Migrations     │   │   nvidia/nemotron-4-340b)   │
               └─────────────────────────────┘   └─────────────────────────────┘
 ```
+
+### Real-World Cloud & Edge Hybrid Topology
+
+For worldwide mobile access without compromising local LAN security, Cyber Home Shield supports a **Zero-Trust Cloud + Edge Hybrid Model**:
+- **Public Edge Frontend**: Hosted globally on [Vercel](https://cyber-home-shield.vercel.app).
+- **Persistent Cloud Database**: Managed PostgreSQL on [Supabase](https://supabase.com).
+- **Zero-Trust Private Tunnel**: Encrypted outbound tunnel via **Cloudflare Tunnel (`cloudflared`)**.
+- **Defensive Edge Daemon**: FastAPI running on the local PC inside the physical Wi-Fi network.
+
+*(See [Section 8: Real-Time Cloud & Edge Deployment](#8-real-time-cloud--edge-deployment-vercel--cloudflare-tunnel) for the full architecture breakdown and setup instructions).*
 
 ---
 
@@ -399,7 +410,98 @@ The backend configuration is managed through Pydantic Settings in `backend/app/c
 
 ---
 
-## 8. Windows PortProxy Setup Guide
+## 8. Real-Time Cloud & Edge Deployment (Vercel + Cloudflare Tunnel)
+
+Cyber Home Shield is architected to protect real-world physical devices (Smart TVs, laptops, mobile phones, security cameras, IoT sensors). To enable users to monitor their network from anywhere in the world (e.g., from an iPhone or Android phone over 5G, or a remote laptop) without compromising the security of their home network, the platform utilizes a **Zero-Trust Hybrid Cloud & Edge Architecture**.
+
+### The Architectural Problem: Why Cloud-Only Hosting Fails for Home LANs
+
+Traditional web applications host both their frontend and backend entirely on public cloud services (e.g., AWS, Render, Heroku). However, for an authentic defensive network security tool, this approach is fundamentally impossible:
+1. **Private RFC 1918 Address Spaces & Router NAT**: Home routers enforce Network Address Translation (NAT) and stateful firewalls. A cloud server in AWS cannot reach into your private home subnet (`192.168.1.0/24`) to ping your Smart TV or harvest ARP tables.
+2. **The Danger of Router Port Forwarding**: Opening ports on your home router (such as port 8000 or 80) exposes your residential ISP public IP address to automated vulnerability scanners (Shodan, Censys, Mirai botnets), turning your home network into an immediate target.
+
+### The Zero-Trust Solution: Hybrid Edge Architecture
+
+Cyber Home Shield resolves this challenge by combining **Vercel** (Global Edge CDN), **Supabase** (Cloud PostgreSQL), and **Cloudflare Tunnel (`cloudflared`)** with a local defensive edge daemon running on your PC:
+
+```text
+┌──────────────────────────┐
+│  Phone / Vercel Website  │
+└─────────────┬────────────┘
+              │ (Public HTTPS)
+              ▼
+┌──────────────────────────┐
+│ Cloudflare Global Server │
+└─────────────┬────────────┘
+              │
+              │  ◄═══ PRIVATE ENCRYPTED TUNNEL ═══►
+              │  (No router ports opened! No hackers can see your home IP!)
+              ▼
+┌──────────────────────────┐
+│ cloudflared on your PC   │
+└─────────────┬────────────┘
+              │ (Local)
+              ▼
+┌──────────────────────────┐
+│ FastAPI Backend (:8000)  │ ──► Scans your real home Wi-Fi!
+└──────────────────────────┘
+```
+
+### What is Cloudflare Tunnel (`cloudflared`)?
+
+`cloudflared` is an open-source, lightweight edge daemon developed by Cloudflare. Instead of waiting for incoming traffic by listening on a public port, `cloudflared` creates **outbound-only connections** over secure TLS/QUIC (ports 443 and 7844) from your local computer to the nearest Cloudflare global edge servers.
+
+Key security benefits:
+- 🛡️ **Zero Open Inbound Ports**: Your home router firewall remains 100% closed. No port forwarding is required.
+- 🎭 **Complete IP Concealment**: Outside clients and mobile devices connect to Cloudflare's Anycast IP addresses. Your home ISP public IP address is never revealed.
+- 🔒 **End-to-End Encryption**: Every request from your mobile phone or Vercel is encrypted over public HTTPS signed by trusted Cloudflare root certificates.
+- ⚡ **DDoS & Bot Shielding**: Cloudflare automatically mitigates volumetric layer-3/4 DDoS attacks and malicious web scrapers before traffic reaches your PC.
+
+---
+
+### Component Breakdown
+
+| Layer | Technology | Hosting Location | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Frontend Web App** | React 18 + TypeScript + Vite | **Vercel** (`https://cyber-home-shield.vercel.app`) | Global edge CDN, ultra-low latency UI delivery, responsive mobile access from anywhere. |
+| **Database** | PostgreSQL 15 (AsyncPG) | **Supabase** (Cloud DB) | Secure, persistent cloud storage for users, devices, findings, honeypot events, and scan histories. |
+| **Secure Tunnel** | Cloudflare Tunnel (`cloudflared`) | **Cloudflare Global Edge** | Establishes zero-trust bidirectional proxy to local machine without port forwarding. |
+| **Defensive Edge Daemon**| FastAPI + Uvicorn (Python 3.11) | **Your Local PC** (`:8000`) | Directly connected to physical home Wi-Fi to harvest OS ARP cache, execute ICMP sweeps, and host honeypots. |
+| **AI Threat Advisory** | Meta Llama 3.2 11B / Nemotron | **NVIDIA NIM Cloud API** | Rapid server-side threat triage and remediation playbooks. |
+
+---
+
+### How to Run the Real-Time Deployment
+
+#### Step 1: Start the Local FastAPI Backend Daemon
+From the project root:
+```powershell
+cd backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+*The backend is now listening locally and connected to your cloud Supabase PostgreSQL database.*
+
+#### Step 2: Launch the Cloudflare Tunnel
+Run the included launcher script in PowerShell:
+```powershell
+.\start_tunnel.ps1
+```
+*Or manually execute:*
+```powershell
+& "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://127.0.0.1:8000
+```
+Cloudflare will assign a public HTTPS endpoint (for example, `https://reasonable-contrast-hopefully-cosmetics.trycloudflare.com`).
+
+#### Step 3: Access from Any Device (Mobile / Remote Browser)
+1. Open the live Vercel web application:
+   👉 **`https://cyber-home-shield.vercel.app`**
+2. In the top navigation bar or settings dialog, provide your active Cloudflare Tunnel URL (or configure `VITE_API_URL` in your Vercel project environment variables).
+3. Log in with your credentials.
+4. **Trigger scans and view real-time defenses**: You can now initiate Wi-Fi discovery scans, monitor honeypot intrusion attempts, and chat with the CipherX AI security advisor right from your mobile phone while away from home!
+
+---
+
+## 9. Windows PortProxy Setup Guide
 
 To catch real attackers scanning standard ports on your local network (e.g., Nmap or Masscan scanning ports 80, 22, and 554), forward incoming traffic on privileged ports to your Cyber Home Shield honeypot listeners using the Windows built-in `netsh interface portproxy`.
 
@@ -441,7 +543,7 @@ Remove-NetFirewallRule -DisplayName "Cyber Home Shield - Honeypot Traps"
 
 ---
 
-## 9. Testing & Quality Verification
+## 10. Testing & Quality Verification
 
 Cyber Home Shield maintains a strict, high-coverage testing regime across both the Python backend and TypeScript frontend:
 
@@ -461,7 +563,7 @@ npm run build
 
 ---
 
-## 10. Complete API Endpoint Reference
+## 11. Complete API Endpoint Reference
 
 All endpoints are prefixed with `/api/v1`. Protected endpoints require a valid JWT Bearer token via `Authorization: Bearer <token>`.
 
@@ -518,7 +620,7 @@ All endpoints are prefixed with `/api/v1`. Protected endpoints require a valid J
 
 ---
 
-## 11. Academic Presentation & Report Artifacts
+## 12. Academic Presentation & Report Artifacts
 
 For academic evaluations, thesis defenses, conference presentations, and technical documentation, a comprehensive presentation script and formal project report synopsis is included in the project repository:
 
@@ -530,7 +632,7 @@ This document contains:
 
 ---
 
-## 12. Security Boundaries & Responsible Use
+## 13. Security Boundaries & Responsible Use
 
 Cyber Home Shield is strictly engineered as a **defensive network monitoring and posture analysis tool**.
 
@@ -553,7 +655,7 @@ Cyber Home Shield is strictly engineered as a **defensive network monitoring and
 
 ---
 
-## 13. License & Acknowledgments
+## 14. License & Acknowledgments
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
