@@ -94,6 +94,7 @@ async def discover_inventory_devices(
 
     refreshed = await db.execute(
         select(Device)
+        .options(selectinload(Device.ports))
         .where(Device.user_id == current_user.id)
         .order_by(Device.last_seen.desc())
     )
@@ -140,6 +141,7 @@ async def list_devices(
 
     stmt = (
         select(Device)
+        .options(selectinload(Device.ports))
         .order_by(Device.last_seen.desc())
     )
 
@@ -377,7 +379,7 @@ async def create_device(
 
     await db.commit()
 
-    await db.refresh(device)
+    await db.refresh(device, ["ports"])
 
     return DeviceResponse.model_validate(device)
 

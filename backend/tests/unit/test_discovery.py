@@ -49,6 +49,9 @@ class FakeHostDiscoverer:
     def read_current_windows_neighbors(self):
         return self.neighbors
 
+    async def active_arp_scan(self, subnet, timeout_seconds=2.5):
+        return {}
+
     async def probe_host(self, ip_address, timeout_seconds=1.0):
         if self.probes is None:
             return (

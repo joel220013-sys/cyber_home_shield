@@ -1,4 +1,4 @@
-﻿"""Device Pydantic schemas."""
+"""Device Pydantic schemas."""
 
 import uuid
 from datetime import datetime
@@ -63,6 +63,7 @@ class DeviceResponse(DeviceBase):
     last_seen: datetime
     created_at: datetime
     updated_at: datetime
+    ports: List[OpenPortResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -70,7 +71,6 @@ class DeviceResponse(DeviceBase):
 class DeviceDetailResponse(DeviceResponse):
     """Extended device details with ports and security findings."""
 
-    ports: List[OpenPortResponse] = Field(default_factory=list)
     findings: List[SecurityFindingResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

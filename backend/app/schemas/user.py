@@ -1,4 +1,4 @@
-﻿"""User authentication and profile Pydantic schemas with zero-dependency email validator."""
+"""User authentication and profile Pydantic schemas with zero-dependency email validator."""
 
 import re
 import uuid
@@ -73,7 +73,7 @@ class UserUpdateRequest(BaseModel):
                 raise ValueError(
                     f"Scope '{v_clean}' must be a valid private RFC 1918 CIDR subnet (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)."
                 )
-                return v_clean
+            return v_clean
         return v
 
 

@@ -1,4 +1,4 @@
-﻿"""Device ORM Model."""
+"""Device ORM Model."""
 
 import uuid
 from datetime import datetime
@@ -174,6 +174,7 @@ class Device(Base, TimestampMixin):
         "OpenPort",
         back_populates="device",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     # ============================================================

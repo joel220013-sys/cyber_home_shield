@@ -92,10 +92,22 @@ export async function apiRequest<T>(
         errorBody = await response.text();
       }
 
-      const detailMsg =
-        typeof errorBody === 'object' && errorBody !== null
-          ? errorBody.detail || errorBody.message || JSON.stringify(errorBody)
-          : String(errorBody);
+      let detailMsg: string;
+      if (typeof errorBody === 'object' && errorBody !== null) {
+        if (Array.isArray(errorBody.detail)) {
+          detailMsg = errorBody.detail
+            .map((item: any) => (typeof item === 'object' && item?.msg ? item.msg : String(item)))
+            .join('; ');
+        } else if (typeof errorBody.detail === 'string') {
+          detailMsg = errorBody.detail;
+        } else if (typeof errorBody.message === 'string') {
+          detailMsg = errorBody.message;
+        } else {
+          detailMsg = JSON.stringify(errorBody);
+        }
+      } else {
+        detailMsg = String(errorBody);
+      }
 
       throw new ApiError(
         detailMsg || `HTTP ${response.status}: ${response.statusText}`,

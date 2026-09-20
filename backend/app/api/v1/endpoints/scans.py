@@ -1,4 +1,4 @@
-﻿"""Scan execution and management API endpoints with resource ownership enforcement."""
+"""Scan execution and management API endpoints with resource ownership enforcement."""
 
 import asyncio
 import uuid
@@ -67,10 +67,26 @@ class ScanRequest(BaseModel):
     @field_validator("scan_type", mode="before")
     @classmethod
     def parse_scan_type(cls, value: Any) -> Any:
-        """Normalize scan type strings to the ScanType enum."""
-
+        """Normalize scan type strings and UI aliases to the ScanType enum."""
         if isinstance(value, str):
             value_upper = value.strip().upper()
+            aliases = {
+                "PORT_PROFILE": ScanType.STANDARD_AUDIT,
+                "PORTPROFILE": ScanType.STANDARD_AUDIT,
+                "PORTS": ScanType.STANDARD_AUDIT,
+                "SERVICE": ScanType.STANDARD_AUDIT,
+                "SERVICES": ScanType.STANDARD_AUDIT,
+                "STANDARD": ScanType.STANDARD_AUDIT,
+                "FULL": ScanType.DEEP_PROFILE,
+                "DEEP": ScanType.DEEP_PROFILE,
+                "COMPREHENSIVE": ScanType.DEEP_PROFILE,
+                "AUDIT": ScanType.DEEP_PROFILE,
+                "QUICK": ScanType.DISCOVERY,
+                "ARP": ScanType.DISCOVERY,
+                "ICMP": ScanType.DISCOVERY,
+            }
+            if value_upper in aliases:
+                return aliases[value_upper]
 
             if hasattr(ScanType, value_upper):
                 return getattr(ScanType, value_upper)
@@ -95,6 +111,17 @@ async def _execute_scan_job(
     owner_user_id: Optional[uuid.UUID],
 ) -> None:
     """Execute a persisted scan job outside the request lifecycle."""
+
+    # Select appropriate defensive ports according to scan strategy if not explicitly passed:
+    if ports is None:
+        if scan_type == ScanType.STANDARD_AUDIT:
+            ports = [21, 22, 23, 53, 80, 443, 445, 554, 631, 8080, 8443, 8888]
+        elif scan_type == ScanType.DEEP_PROFILE:
+            ports = [
+                21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 554, 631,
+                993, 995, 1433, 1883, 3306, 3389, 5000, 5432, 5900, 8000, 8080,
+                8443, 8554, 8888, 9000
+            ]
 
     async with AsyncSessionLocal() as db:
         try:

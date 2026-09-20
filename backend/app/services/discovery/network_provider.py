@@ -238,8 +238,9 @@ class LiveNetworkDiscoveryProvider(BaseDiscoveryProvider):
         # --------------------------------------------------------------
 
         active_arp_hosts: dict[str, str] = {}
-        if settings.ENABLE_ACTIVE_ARP_SCAN and "/" in target.target_subnet:
-            active_arp_hosts = await self.host_discoverer.active_arp_scan(
+        active_arp_fn = getattr(self.host_discoverer, "active_arp_scan", None)
+        if settings.ENABLE_ACTIVE_ARP_SCAN and "/" in target.target_subnet and active_arp_fn:
+            active_arp_hosts = await active_arp_fn(
                 target.target_subnet.strip(),
                 timeout_seconds=settings.ACTIVE_ARP_SCAN_TIMEOUT,
             )

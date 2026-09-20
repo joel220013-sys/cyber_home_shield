@@ -21,7 +21,13 @@ export type DeviceType =
   | 'MOBILE'
   | 'UNKNOWN';
 
-export type ScanType = 'DISCOVERY' | 'QUICK' | 'FULL' | 'PORT_PROFILE';
+export type ScanType =
+  | 'DISCOVERY'
+  | 'QUICK'
+  | 'FULL'
+  | 'PORT_PROFILE'
+  | 'STANDARD_AUDIT'
+  | 'DEEP_PROFILE';
 
 export type ScanStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
