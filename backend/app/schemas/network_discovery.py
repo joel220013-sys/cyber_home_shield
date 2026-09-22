@@ -62,3 +62,5 @@ class NetworkDiscoveryResponse(BaseModel):
     """Total number of devices discovered (convenience field = len(devices))."""
     scan_method: str = "arp_icmp"
     """Scan method used: 'arp_icmp', 'nmap', or 'arp_icmp+nmap'."""
+    message: Optional[str] = None
+    """Optional message explaining discovery status, such as scope authorization status."""

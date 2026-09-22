@@ -1,8 +1,19 @@
-import React, { useState } from 'react';
-import { CheckCircle, Loader2, Router, ShieldAlert, Wifi, Activity, Layers } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  CheckCircle,
+  Loader2,
+  Router,
+  ShieldAlert,
+  Wifi,
+  Activity,
+  Layers,
+  AlertTriangle,
+  ArrowRight,
+} from 'lucide-react';
 import { Card } from '../common/Card';
 import { networkService } from '../../services/networkService';
 import { NetworkDiscoveryResponse, RouterDetectionResponse, RouterHealthResponse } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 
 /** Return a Tailwind colour class for the hop count. */
 function hopColour(hops: number | null): string {
@@ -24,6 +35,7 @@ interface RouterDetectionPanelProps {
 }
 
 export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDiscovered }) => {
+  const { user, updateProfile } = useAuth();
   const [detection, setDetection] = useState<RouterDetectionResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -33,6 +45,9 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
   const [discovery, setDiscovery] = useState<NetworkDiscoveryResponse | null>(null);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryError, setDiscoveryError] = useState(false);
+  const [isAuthorizing, setIsAuthorizing] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
 
   const detectRouter = async () => {
     setLoading(true);
@@ -46,6 +61,10 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    detectRouter();
+  }, []);
 
   const checkRouter = async () => {
     setHealthLoading(true);
@@ -61,8 +80,52 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
   };
 
   const isDetected = detection?.status === 'detected';
+  const detectedNetwork = detection?.network_cidr;
+  const userScope = user?.authorized_network_scope;
+  const isScopeMismatch = Boolean(
+    isDetected &&
+    detectedNetwork &&
+    userScope &&
+    detectedNetwork !== userScope
+  );
+
+  const handleAuthorizeAndDiscover = async () => {
+    if (!detectedNetwork) return;
+    setIsAuthorizing(true);
+    setAuthError(null);
+    setAuthSuccess(null);
+    try {
+      await updateProfile({ authorized_network_scope: detectedNetwork });
+      setAuthSuccess(`Authorized defensive scope switched to ${detectedNetwork}`);
+
+      // Immediately run discovery on the freshly authorized network!
+      setDiscoveryLoading(true);
+      setDiscoveryError(false);
+      try {
+        const res = await networkService.discoverDevices();
+        setDiscovery(res);
+        onDiscovered?.();
+      } catch {
+        setDiscovery(null);
+        setDiscoveryError(true);
+      } finally {
+        setDiscoveryLoading(false);
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Failed to update authorized network scope');
+    } finally {
+      setIsAuthorizing(false);
+    }
+  };
 
   const discoverDevices = async () => {
+    // If scope mismatch, seamlessly update profile to the detected network
+    // before discovering so scanning is not blocked by stale scope
+    if (isScopeMismatch && detectedNetwork) {
+      await handleAuthorizeAndDiscover();
+      return;
+    }
+
     setDiscoveryLoading(true);
     setDiscoveryError(false);
     try {
@@ -95,11 +158,19 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
           <button
             type="button"
             onClick={discoverDevices}
-            disabled={discoveryLoading}
+            disabled={discoveryLoading || isAuthorizing}
             className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-950/30 px-3 py-2 text-xs font-semibold text-cyan-200 transition-colors hover:bg-cyan-900/40 disabled:cursor-wait disabled:opacity-60"
           >
-            {discoveryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
-            {discoveryLoading ? 'Scanning network...' : 'Discover Devices'}
+            {discoveryLoading || isAuthorizing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Wifi className="h-4 w-4" />
+            )}
+            {isAuthorizing
+              ? 'Authorizing scope...'
+              : discoveryLoading
+              ? 'Scanning network...'
+              : 'Discover Devices'}
           </button>
           <button
             type="button"
@@ -141,6 +212,53 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
         </div>
       )}
 
+      {/* ── Network Scope Mismatch Warning & 1-Click Authorize ── */}
+      {isScopeMismatch && (
+        <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-950/30 p-4 shadow-lg shadow-amber-950/20">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-lg bg-amber-500/10 p-2 text-amber-400 border border-amber-500/20 shrink-0">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-amber-200">Network Scope Mismatch</h4>
+                  <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
+                    Protection Active
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-amber-300/80">
+                  Your physical machine is on <span className="font-mono font-bold text-white bg-slate-900/60 px-1.5 py-0.5 rounded">{detectedNetwork}</span>, but your account is authorized for <span className="font-mono font-bold text-amber-200 bg-slate-900/60 px-1.5 py-0.5 rounded">{userScope}</span>.
+                  Discovery was locked to prevent unauthorized cross-subnet scanning.
+                </p>
+                {authError && <p className="mt-1.5 text-xs text-rose-400 font-semibold">{authError}</p>}
+                {authSuccess && <p className="mt-1.5 text-xs text-emerald-400 font-semibold">{authSuccess}</p>}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAuthorizeAndDiscover}
+              disabled={isAuthorizing || discoveryLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-cyan-500 px-4 py-2.5 text-xs font-bold text-slate-950 shadow-md shadow-cyan-950/50 hover:from-amber-400 hover:to-cyan-400 disabled:cursor-wait disabled:opacity-60 transition-all shrink-0"
+            >
+              {isAuthorizing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin text-slate-950" />
+                  <span>Authorizing...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4 text-slate-950" />
+                  <span>Authorize & Discover {detectedNetwork}</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-slate-950" />
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {healthError && !healthLoading && (
         <p className="mt-4 border-t border-slate-800 pt-3 text-sm text-amber-300">Router Unavailable</p>
       )}
@@ -163,17 +281,21 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
       )}
 
       {/* ── Discovery scanning indicator ── */}
-      {discoveryLoading && (
+      {(discoveryLoading || isAuthorizing) && (
         <div className="mt-4 border-t border-slate-800 pt-4">
           <div className="flex items-center gap-2 text-sm text-cyan-300">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Running ARP + Nmap scan — this may take up to 30 s…</span>
+            <span>
+              {isAuthorizing
+                ? `Authorizing subnet ${detectedNetwork}...`
+                : 'Running ARP + Nmap scan — this may take up to 30 s…'}
+            </span>
           </div>
         </div>
       )}
 
       {/* ── Discovery results ── */}
-      {discovery && !discoveryLoading && (
+      {discovery && !discoveryLoading && !isAuthorizing && (
         <div className="mt-4 border-t border-slate-800 pt-4 text-sm">
 
           {/* Header row: status + stats badges */}
@@ -206,7 +328,30 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
           </div>
 
           {discovery.devices.length === 0 ? (
-            <p className="text-slate-500">No devices found on this subnet.</p>
+            <div className="space-y-2 py-2">
+              <p className="text-slate-400">
+                {discovery.message ||
+                  (discovery.status === 'unavailable' && isScopeMismatch
+                    ? `Discovery was halted because detected subnet ${discovery.network || detectedNetwork} is outside your registered scope (${userScope}).`
+                    : 'No devices found on this subnet.')}
+              </p>
+              {isScopeMismatch && (
+                <div className="flex items-center gap-3 pt-1">
+                  <span className="text-xs text-amber-300">
+                    Click the button above or{' '}
+                    <button
+                      type="button"
+                      onClick={handleAuthorizeAndDiscover}
+                      disabled={isAuthorizing || discoveryLoading}
+                      className="underline font-bold text-cyan-300 hover:text-cyan-200 disabled:opacity-50"
+                    >
+                      click here to authorize {detectedNetwork}
+                    </button>{' '}
+                    and scan all local devices.
+                  </span>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-slate-800">
               <table className="w-full text-left text-xs">
@@ -290,7 +435,7 @@ export const RouterDetectionPanel: React.FC<RouterDetectionPanelProps> = ({ onDi
         </div>
       )}
 
-      {discoveryError && !discoveryLoading && (
+      {discoveryError && !discoveryLoading && !isAuthorizing && (
         <p className="mt-4 border-t border-slate-800 pt-3 text-sm text-amber-300">
           Error discovering devices — check that the backend is running.
         </p>

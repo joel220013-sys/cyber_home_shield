@@ -356,6 +356,7 @@ export interface NetworkDiscoveryResponse {
   devices: DiscoveredNetworkDevice[];
   total_devices: number;
   scan_method: string;
+  message?: string | null;
 }
 
 export interface DeviceRiskExplanation {

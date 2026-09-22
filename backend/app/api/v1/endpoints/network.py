@@ -107,6 +107,7 @@ async def discover_local_devices(
                 status="unavailable",
                 network=network,
                 devices=[],
+                message=f"Detected subnet {network} is outside your registered authorized scope ({current_user.authorized_network_scope}). Authorize this network to scan.",
             )
     except (ValueError, TypeError):
         return NetworkDiscoveryResponse(
