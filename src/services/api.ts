@@ -4,11 +4,41 @@
  * Communicates strictly with the FastAPI Backend (VITE_API_BASE_URL)
  */
 
-export const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_BASE_URL ||
-  (typeof window !== 'undefined' && window.location.port === '3000'
-    ? 'http://127.0.0.1:8000'
-    : 'http://127.0.0.1:8000');
+export const DEFAULT_TUNNEL_URL = 'https://core-reserved-belle-manitoba.trycloudflare.com';
+
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('chs_backend_url');
+    if (saved && saved.trim()) {
+      return saved.trim().replace(/\/$/, '');
+    }
+  }
+  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/$/, '');
+  }
+  // When running remotely on Vercel or mobile browser, default to active Cloudflare Tunnel
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+  ) {
+    return DEFAULT_TUNNEL_URL;
+  }
+  return 'http://127.0.0.1:8000';
+}
+
+export function setApiBaseUrl(url: string): void {
+  if (typeof window !== 'undefined') {
+    if (url && url.trim()) {
+      localStorage.setItem('chs_backend_url', url.trim().replace(/\/$/, ''));
+    } else {
+      localStorage.removeItem('chs_backend_url');
+    }
+  }
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 let authToken: string | null = null;
 
@@ -57,9 +87,10 @@ export class ApiError extends Error {
 export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
-  timeoutMs: number = 10000
+  timeoutMs: number = 15000
 ): Promise<T> {
-  const url = `${API_BASE_URL.replace(/\/$/, '')}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -89,50 +120,53 @@ export async function apiRequest<T>(
       try {
         errorBody = await response.json();
       } catch {
-        errorBody = await response.text();
-      }
-
-      let detailMsg: string;
-      if (typeof errorBody === 'object' && errorBody !== null) {
-        if (Array.isArray(errorBody.detail)) {
-          detailMsg = errorBody.detail
-            .map((item: any) => (typeof item === 'object' && item?.msg ? item.msg : String(item)))
-            .join('; ');
-        } else if (typeof errorBody.detail === 'string') {
-          detailMsg = errorBody.detail;
-        } else if (typeof errorBody.message === 'string') {
-          detailMsg = errorBody.message;
-        } else {
-          detailMsg = JSON.stringify(errorBody);
+        try {
+          errorBody = await response.text();
+        } catch {
+          errorBody = null;
         }
-      } else {
-        detailMsg = String(errorBody);
       }
 
-      throw new ApiError(
-        detailMsg || `HTTP ${response.status}: ${response.statusText}`,
-        response.status,
-        errorBody
-      );
+      let errorMessage = `HTTP ${response.status} ${response.statusText}`;
+      if (errorBody) {
+        if (typeof errorBody === 'string') {
+          errorMessage = errorBody;
+        } else if (typeof errorBody.detail === 'string') {
+          errorMessage = errorBody.detail;
+        } else if (Array.isArray(errorBody.detail)) {
+          errorMessage = errorBody.detail
+            .map((errItem: any) =>
+              typeof errItem === 'object' && errItem !== null
+                ? errItem.msg || errItem.message || JSON.stringify(errItem)
+                : String(errItem)
+            )
+            .join('; ');
+        } else if (errorBody.message) {
+          errorMessage = errorBody.message;
+        }
+      }
+
+      throw new ApiError(errorMessage, response.status, errorBody);
     }
 
     if (response.status === 204) {
       return {} as T;
     }
 
-    return (await response.json()) as T;
-  } catch (error: any) {
+    return await response.json();
+  } catch (err: any) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new ApiError(`Request timed out after ${timeoutMs}ms`, 408);
+    if (err.name === 'AbortError') {
+      throw new ApiError('Request timed out. Please check if your backend and tunnel are reachable.', 408);
     }
-    if (error instanceof ApiError) {
-      throw error;
+    if (err instanceof ApiError) {
+      throw err;
     }
+    const currentBase = getApiBaseUrl();
     throw new ApiError(
-      error.message || 'Unable to connect to Cyber Home Shield backend',
+      `Cannot connect to backend (${currentBase}). Please check your Cloudflare Tunnel connection.`,
       0,
-      error
+      err
     );
   }
 }
