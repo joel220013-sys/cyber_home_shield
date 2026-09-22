@@ -98,25 +98,16 @@ async def discover_local_devices(
                 devices=[],
             )
         if not detected_network.subnet_of(authorized_network):
-            from app.core.security import is_rfc1918_private_subnet
-            if is_rfc1918_private_subnet(network):
-                # Mark the new scope on the ORM object — get_db teardown
-                # commits it at the end of the request. We deliberately do
-                # NOT call db.commit() here to avoid poisoning the session
-                # before DiscoveryService does its own DB writes.
-                current_user.authorized_network_scope = network
-                logger.info(
-                    "Auto-updated authorized_network_scope to detected "
-                    "network %s for user %s.",
-                    network,
-                    current_user.id,
-                )
-            else:
-                return NetworkDiscoveryResponse(
-                    status="unavailable",
-                    network=network,
-                    devices=[],
-                )
+            logger.warning(
+                "[discover] Detected network %s is outside user's authorized scope %s",
+                network,
+                current_user.authorized_network_scope,
+            )
+            return NetworkDiscoveryResponse(
+                status="unavailable",
+                network=network,
+                devices=[],
+            )
     except (ValueError, TypeError):
         return NetworkDiscoveryResponse(
             status="unavailable",

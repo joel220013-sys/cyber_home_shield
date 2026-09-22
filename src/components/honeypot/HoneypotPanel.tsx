@@ -66,8 +66,8 @@ export const HoneypotPanel: React.FC<HoneypotPanelProps> = ({ onOpenAdvisorWithP
   const [selectedEventForAnalysis, setSelectedEventForAnalysis] = useState<HoneypotEvent | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState<boolean>(false);
 
-  // Network Scope & Port Proxying State
-  const [bindScope, setBindScope] = useState<'lan' | 'local'>('lan');
+  // Network Scope & Port Proxying State (Default: local 127.0.0.1 for safety)
+  const [bindScope, setBindScope] = useState<'lan' | 'local'>('local');
   const [copiedPortCmd, setCopiedPortCmd] = useState<boolean>(false);
   const [copiedLanUrl, setCopiedLanUrl] = useState<boolean>(false);
   const [showPortProxyGuide, setShowPortProxyGuide] = useState<boolean>(false);
@@ -100,7 +100,8 @@ export const HoneypotPanel: React.FC<HoneypotPanelProps> = ({ onOpenAdvisorWithP
         await honeypotService.stop();
       } else {
         const targetHost = bindScope === 'lan' ? '0.0.0.0' : '127.0.0.1';
-        await honeypotService.start(targetHost);
+        const allowNonLocal = bindScope === 'lan';
+        await honeypotService.start(targetHost, allowNonLocal);
       }
       await fetchData();
     } catch (err: any) {
@@ -206,32 +207,32 @@ export const HoneypotPanel: React.FC<HoneypotPanelProps> = ({ onOpenAdvisorWithP
           </div>
 
           <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
-            {/* Listening Scope Selector */}
+            {/* Listening Scope Selector - Safe by Default */}
             {!status?.running && (
               <div className="flex items-center rounded-lg border border-slate-700 bg-slate-800 p-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setBindScope('lan')}
-                  className={`px-2.5 py-1 rounded font-medium transition ${
-                    bindScope === 'lan'
-                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title="Listens on 0.0.0.0 to catch probes from other devices on your local Wi-Fi/LAN"
-                >
-                  LAN (0.0.0.0)
-                </button>
                 <button
                   type="button"
                   onClick={() => setBindScope('local')}
                   className={`px-2.5 py-1 rounded font-medium transition ${
                     bindScope === 'local'
-                      ? 'bg-slate-700 text-slate-100'
+                      ? 'bg-slate-700 text-slate-100 shadow-sm border border-slate-600'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
-                  title="Listens only on 127.0.0.1 loopback"
+                  title="Secure Default: Listens safely on 127.0.0.1 loopback for local testing"
                 >
-                  Localhost
+                  Localhost (127.0.0.1)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBindScope('lan')}
+                  className={`px-2.5 py-1 rounded font-medium transition ${
+                    bindScope === 'lan'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="LAN Deception Mode: Listens on 0.0.0.0 to catch probes from other devices on your local Wi-Fi/LAN"
+                >
+                  LAN Mode (0.0.0.0)
                 </button>
               </div>
             )}

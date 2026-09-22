@@ -19,10 +19,13 @@ export const honeypotService = {
   /**
    * Start honeypot listeners
    */
-  async start(bindHost?: string): Promise<HoneypotStartResponse> {
+  async start(bindHost?: string, allowNonLocal?: boolean): Promise<HoneypotStartResponse> {
     return await apiRequest<HoneypotStartResponse>('/api/v1/honeypot/start', {
       method: 'POST',
-      body: JSON.stringify({ bind_host: bindHost || '127.0.0.1' }),
+      body: JSON.stringify({
+        bind_host: bindHost || '127.0.0.1',
+        allow_non_local: allowNonLocal ?? (bindHost === '0.0.0.0'),
+      }),
     });
   },
 

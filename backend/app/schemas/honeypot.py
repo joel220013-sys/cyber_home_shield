@@ -67,6 +67,7 @@ class HoneypotEventResponse(HoneypotEventBase):
 class HoneypotStartRequest(BaseModel):
     """Payload to start honeypot traps."""
     bind_host: Optional[str] = Field(default=None, description="Custom bind host (must be 127.0.0.1 unless non-local explicitly allowed)")
+    allow_non_local: Optional[bool] = Field(default=False, description="Explicit administrative opt-in to allow non-local / 0.0.0.0 LAN binding")
 
 
 class HoneypotStartResponse(BaseModel):

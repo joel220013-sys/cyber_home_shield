@@ -67,15 +67,24 @@ class HoneypotManager:
     def disable(self) -> None:
         self._enabled = False
 
-    async def start(self, custom_bind_host: Optional[str] = None) -> List[str]:
+    async def start(
+        self,
+        custom_bind_host: Optional[str] = None,
+        allow_non_local: Optional[bool] = None,
+    ) -> List[str]:
         """
         Start all honeypot trap listeners on validated host.
         Enforces defensive isolation and rejects non-local host bindings unless configured.
         """
+        effective_allow_non_local = (
+            allow_non_local
+            if allow_non_local is not None
+            else settings.HONEYPOT_ALLOW_NON_LOCAL
+        )
         target_host = custom_bind_host or self.bind_host or "127.0.0.1"
         validated_host = validate_honeypot_bind_host(
             target_host,
-            allow_non_local=settings.HONEYPOT_ALLOW_NON_LOCAL,
+            allow_non_local=effective_allow_non_local,
         )
         self.bind_host = validated_host
 

@@ -1,4 +1,4 @@
-﻿"""Honeypot Deception Subsystem API Endpoints."""
+"""Honeypot Deception Subsystem API Endpoints."""
 
 import uuid
 from typing import List, Optional
@@ -88,9 +88,13 @@ async def start_honeypot(
     Start defensive honeypot trap listeners. Enforces localhost isolation by default.
     """
     custom_host = request.bind_host if request else None
+    allow_non_local = request.allow_non_local if request else False
     try:
         honeypot_manager.enable()
-        active = await honeypot_manager.start(custom_bind_host=custom_host)
+        active = await honeypot_manager.start(
+            custom_bind_host=custom_host,
+            allow_non_local=allow_non_local,
+        )
         return HoneypotStartResponse(
             status="started",
             running=True,

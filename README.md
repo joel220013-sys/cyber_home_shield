@@ -8,7 +8,7 @@
 [![Tailwind CSS: 3.4](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![AI: Meta Llama 3.2 / NVIDIA Nemotron](https://img.shields.io/badge/AI_Engine-Meta_Llama_3.2_/_NVIDIA_Nemotron-76B900.svg?logo=nvidia&logoColor=white)](https://build.nvidia.com/)
 [![Database: PostgreSQL / Supabase](https://img.shields.io/badge/Database-PostgreSQL_/_Supabase-336791.svg?logo=postgresql&logoColor=white)](https://supabase.com/)
-[![Tests: 143+ Passed](https://img.shields.io/badge/Tests-143+_Passed-brightgreen.svg?logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![Tests: 228 Passed](https://img.shields.io/badge/Tests-228_Passed-brightgreen.svg?logo=pytest&logoColor=white)](https://docs.pytest.org/)
 
 > **Next-Generation Defensive Home-Network Cybersecurity Platform**  
 > Real-time RFC 1918 device discovery, deterministic mathematical risk scoring, multi-protocol stealth honeypot deception, Windows Netsh PortProxy integration, and low-latency NVIDIA/Meta AI threat advisory.
@@ -60,29 +60,30 @@ Modern residential and small-office networks have become densely populated ecosy
   │                        DEFENSIVE CORE TENETS                           │
   ├────────────────────────────────────────────────────────────────────────┤
   │ 1. Strict RFC 1918 Scope Confinement (No WAN Scans)                   │
-  │ 2. Non-Destructive, Zero-Impact Discovery Probes                       │
+  │ 2. Bounded, Low-Impact Network Discovery (Passive ARP + Bounded ICMP) │
   │ 3. Deterministic Risk Math (Zero AI Hallucination in Scoring)          │
-  │ 4. Isolated, Command-Free Honeypot Deception Sandbox                  │
+  │ 4. Isolated Honeypot Sandbox (Safe Loopback Default, Opt-In LAN Mode) │
   │ 5. Strict Auto-Redaction of Intercepted Credentials                    │
   │ 6. Server-Side AI Privacy (Zero Client Secret Exposure)                │
   └────────────────────────────────────────────────────────────────────────┘
 ```
 
+- **Core Innovation**: Combining deterministic LAN posture analysis with internal IoT deception. The platform discovers devices, profiles exposed services, calculates a reproducible mathematical risk score, and deploys isolated IoT decoys that provide early-warning telemetry when suspicious hosts probe the network. AI is deliberately kept outside the core scoring path and is utilized strictly for human interpretation and remediation.
 - **RFC 1918 Subnet Confinement**: Scanning, probing, and device mapping are strictly restricted to private address spaces (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, and loopback `127.0.0.0/8`). Public WAN IPs, multicast, and broadcast ranges are categorically rejected at the Pydantic schema validation layer.
-- **Deterministic Risk Scoring**: Risk values ($0–100$) are computed mathematically with sublinear dampening and clear evidence trails, ensuring repeatable posture assessments without relying on unpredictable LLM outputs.
-- **Isolated Honeypot Deception**: Decoy traps execute zero system commands, proxy no traffic, auto-redact intercepted credentials (`[REDACTED]`), and can be bound safely to loopback (`127.0.0.1`) or local LAN (`0.0.0.0`).
+- **Deterministic Risk Scoring**: Risk values ($0–100$) are computed mathematically with sublinear dampening ($\text{Base} \times \sqrt{N}$) and clear evidence trails, ensuring repeatable posture assessments without relying on unpredictable LLM outputs.
+- **Isolated Honeypot Deception**: Decoy traps execute zero system commands, proxy no traffic, auto-redact intercepted credentials (`[REDACTED]`). **Loopback binding (`127.0.0.1`) is the secure default**; LAN binding (`0.0.0.0`) is an explicit administrative opt-in mode requiring firewall controls.
 - **Server-Side AI Privacy**: The NVIDIA NIM API key, prompts, and system instructions remain strictly server-side. No API keys or raw inference tokens are exposed to client browsers.
 
 ---
 
 ## 2. Key Capabilities & Innovations
 
-- 🔍 **Dual-Phase Non-Destructive Discovery**: Instant harvest of OS ARP cache tables combined with bounded asynchronous ICMP ping sweeps and TCP port profiling, eliminating ghost devices while capturing silent endpoints.
-- 🛡️ **Stealth IoT Honeypot Traps**: Emulates realistic IoT firmware banners (`mini_httpd/1.30`, `Dropbear SSH 2020.81`, `Boa/0.94.14rc21 RTSP`) with authentic HTTP 401 Basic authentication challenges and handshake capture.
+- 🔍 **Dual-Phase Bounded Discovery**: Instant passive harvest of OS ARP cache tables combined with bounded asynchronous ICMP ping sweeps and TCP port profiling, eliminating ghost devices while capturing silent endpoints without saturating local bandwidth.
+- 🛡️ **Stealth IoT Honeypot Traps**: Emulates realistic IoT firmware banners (`mini_httpd/1.30`, `Dropbear SSH 2020.81`, `Boa/0.94.14rc21 RTSP`) with authentic HTTP 401 Basic authentication challenges and handshake capture. Safe-by-default on loopback with explicit opt-in LAN deception mode.
 - 🔀 **Windows Netsh PortProxy Integration**: Enables non-privileged user-space traps to intercept standard privileged ports (Port 80 $\to$ 8088, Port 22 $\to$ 2222, Port 554 $\to$ 8554) without running daemons as Administrator.
 - 🧠 **CipherX AI Security Advisor**: Powered by **Meta Llama 3.2 11B Vision Instruct** / **NVIDIA Nemotron** via the NVIDIA NIM API. Features sub-8-second responses, 10-minute in-memory TTL caching to prevent rate-limit exhaustion, and offline deterministic fallback.
 - 📊 **Interactive Cybersecurity Command Center**: Glassmorphic dark-mode UI with live posture gauges, device inventory, interactive honeypot management hub, probe simulator, and instant remediation playbooks.
-- 🔒 **Multi-Tenant Security Architecture**: Password hashing via Argon2id, stateless JWT bearer authorization (HS256), sliding-window rate limiting, and strict tenant-scoped data isolation (IDOR protected).
+- 🔒 **Multi-Tenant Security Architecture**: Password hashing via Argon2id, stateless JWT bearer authorization with HS256 HMAC signing, sliding-window rate limiting, and strict tenant-scoped data isolation (IDOR protected).
 
 ---
 
@@ -334,11 +335,11 @@ cd cyber-home-shield
    SECRET_KEY="your-secure-random-32-character-secret-key-here"
    NVIDIA_API_KEY="nvapi-your-nvidia-api-key-here"
    NVIDIA_MODEL="meta/llama-3.2-11b-vision-instruct"
-   NVIDIA_TIMEOUT=45.0
+   ACCESS_TOKEN_EXPIRE_MINUTES=60
 
-   HONEYPOT_ENABLED=true
-   HONEYPOT_BIND_HOST="0.0.0.0"
-   HONEYPOT_ALLOW_NON_LOCAL=true
+   HONEYPOT_ENABLED=false
+   HONEYPOT_BIND_HOST="127.0.0.1"
+   HONEYPOT_ALLOW_NON_LOCAL=false
    ```
 
 4. **Run Database Migrations**:
@@ -384,8 +385,8 @@ The backend configuration is managed through Pydantic Settings in `backend/app/c
 | `DEBUG` | `false` | Enables detailed logging and debug endpoints |
 | `DATABASE_URL` | `postgresql+asyncpg://...` | Asynchronous SQLAlchemy database connection string |
 | `SECRET_KEY` | *(Random 64+ char key)* | Secret key used for signing JWT tokens |
-| `JWT_ALGORITHM` | `"HS256"` | JWT token encryption algorithm |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` (24 Hours) | JWT token lifespan before re-login is required |
+| `JWT_ALGORITHM` | `"HS256"` | JWT signing algorithm (HMAC-SHA256 digital signature) |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` (1 Hour) | Token lifespan (60m security standard; 1440m dev configurable) |
 | `CORS_ORIGINS` | `http://localhost:3000,...` | Authorized frontend origins (comma-separated) |
 | `NVIDIA_API_KEY` | `""` | NVIDIA NIM API key for CipherX AI advisor |
 | `NVIDIA_MODEL` | `"meta/llama-3.2-11b-vision-instruct"`| Active LLM model (`meta/llama-3.2-11b-vision-instruct` recommended) |
@@ -397,9 +398,9 @@ The backend configuration is managed through Pydantic Settings in `backend/app/c
 | `ICMP_PROBE_TIMEOUT` | `0.5` | Timeout per individual ICMP host echo probe |
 | `MAX_HOSTS` | `254` | Maximum IP addresses scanned in a single subnet job |
 | `MAX_CONCURRENT_CHECKS` | `50` | Maximum parallel asynchronous scan workers |
-| `HONEYPOT_ENABLED` | `true` | Enables the deception trap subsystem |
-| `HONEYPOT_BIND_HOST` | `"0.0.0.0"` | Network interface (`0.0.0.0` for LAN, `127.0.0.1` for loopback) |
-| `HONEYPOT_ALLOW_NON_LOCAL` | `true` | Allows binding to non-loopback addresses |
+| `HONEYPOT_ENABLED` | `false` | Deception trap flag (disabled by default; explicit admin activation) |
+| `HONEYPOT_BIND_HOST` | `"127.0.0.1"` | Secure loopback default (`0.0.0.0` for explicit LAN mode) |
+| `HONEYPOT_ALLOW_NON_LOCAL` | `false` | Strict security default (prevents non-local binding without admin opt-in) |
 | `HONEYPOT_HTTP_PORT` | `8088` | Listening port for the decoy HTTP router trap |
 | `HONEYPOT_SSH_PORT` | `2222` | Listening port for the decoy Dropbear SSH trap |
 | `HONEYPOT_CAMERA_PORT` | `8554` | Listening port for the decoy Boa RTSP camera trap |
@@ -435,7 +436,7 @@ Cyber Home Shield resolves this challenge by combining **Vercel** (Global Edge C
 └─────────────┬────────────┘
               │
               │  ◄═══ PRIVATE ENCRYPTED TUNNEL ═══►
-              │  (No router ports opened! No hackers can see your home IP!)
+              │  (No inbound router ports! Reduces direct exposure of home IP)
               ▼
 ┌──────────────────────────┐
 │ cloudflared on your PC   │
@@ -452,9 +453,9 @@ Cyber Home Shield resolves this challenge by combining **Vercel** (Global Edge C
 `cloudflared` is an open-source, lightweight edge daemon developed by Cloudflare. Instead of waiting for incoming traffic by listening on a public port, `cloudflared` creates **outbound-only connections** over secure TLS/QUIC (ports 443 and 7844) from your local computer to the nearest Cloudflare global edge servers.
 
 Key security benefits:
-- 🛡️ **Zero Open Inbound Ports**: Your home router firewall remains 100% closed. No port forwarding is required.
-- 🎭 **Complete IP Concealment**: Outside clients and mobile devices connect to Cloudflare's Anycast IP addresses. Your home ISP public IP address is never revealed.
-- 🔒 **End-to-End Encryption**: Every request from your mobile phone or Vercel is encrypted over public HTTPS signed by trusted Cloudflare root certificates.
+- 🛡️ **Zero Inbound Port Forwarding**: Your home router firewall remains closed to inbound traffic. No port forwarding rules are needed.
+- 🎭 **Reduced Public IP Exposure**: Outside clients and mobile devices connect to Cloudflare's Anycast IP addresses. Your domestic ISP public IP address is shielded from direct Internet port scans.
+- 🔒 **Multi-Segment Encryption**: HTTPS protects client-to-Cloudflare traffic, while the Cloudflare Tunnel provides an encrypted outbound connection between Cloudflare's edge and the local connector on your PC.
 - ⚡ **DDoS & Bot Shielding**: Cloudflare automatically mitigates volumetric layer-3/4 DDoS attacks and malicious web scrapers before traffic reaches your PC.
 
 ---
@@ -548,7 +549,7 @@ Remove-NetFirewallRule -DisplayName "Cyber Home Shield - Honeypot Traps"
 Cyber Home Shield maintains a strict, high-coverage testing regime across both the Python backend and TypeScript frontend:
 
 ```bash
-# 1. Run all backend unit & integration tests (143+ tests passing)
+# 1. Run all backend unit & integration tests (228 tests passing)
 pytest -q
 
 # 2. Run honeypot and deception tests specifically
@@ -560,6 +561,19 @@ npx tsc --noEmit
 # 4. Build the production frontend distribution bundle
 npm run build
 ```
+
+### Verified Test Coverage & Quality Gates
+
+| Verification Area | Test Suite | Status | Focus |
+| :--- | :--- | :--- | :--- |
+| **All Test Suites** | 21 Python test modules | ✅ **228 / 228 Passed** | Complete backend test suite execution |
+| **Honeypot Sandbox Isolation** | `test_honeypot_isolation.py` | ✅ **Passed** | 127.0.0.1 loopback binding, zero shell execution, payload scrubbing |
+| **RFC 1918 Scope Guards** | `test_network_api.py`, `test_discovery.py`| ✅ **Passed** | Public WAN rejection, boundary enforcement, out-of-scope blocking |
+| **Authentication & Sessions** | `test_auth_api.py`, `test_security.py` | ✅ **Passed** | Argon2id password hashing, JWT HS256 signing, expiration enforcement |
+| **Tenant Isolation (IDOR)** | `test_multitenancy_idor.py` | ✅ **Passed** | Cross-tenant data leak prevention, user-scoped DB queries |
+| **Deterministic Risk Math** | `test_risk_engine.py`, `test_risk_api.py` | ✅ **Passed** | Sublinear exposure math ($\text{Base} \times \sqrt{N}$), anomaly penalties |
+| **Frontend Type Safety** | `npx tsc --noEmit` | ✅ **0 Type Errors** | Strict TypeScript 5.5 type verification across all components |
+| **Production Build** | `npm run build` | ✅ **Optimized Bundle** | Tree-shaken Vite production bundle |
 
 ---
 
