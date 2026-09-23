@@ -4,7 +4,7 @@
  * Communicates strictly with the FastAPI Backend (VITE_API_BASE_URL)
  */
 
-export const DEFAULT_TUNNEL_URL = 'https://andrews-luis-sas-dollars.trycloudflare.com';
+export const DEFAULT_TUNNEL_URL = 'https://dare-induction-lifetime-buses.trycloudflare.com';
 
 export function getApiBaseUrl(): string {
   // When running remotely on Vercel or mobile browser, route through Cloudflare Tunnel
