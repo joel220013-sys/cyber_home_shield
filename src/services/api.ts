@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 /**
  * Centralized API Client for Cyber Home Shield
- * Communicates strictly with the FastAPI Backend (VITE_API_BASE_URL)
+ * Communicates strictly with the FastAPI Backend
  * Features auto-failover, Cloudflare Tunnel detection, and zero-config remote sync.
  */
 
@@ -24,7 +24,7 @@ function isRemoteHost(): boolean {
 /**
  * Fast health check to verify if a candidate backend/tunnel is responding.
  */
-async function checkHealth(candidateUrl: string, timeoutMs: number = 3500): Promise<boolean> {
+async function checkHealth(candidateUrl: string, timeoutMs: number = 4000): Promise<boolean> {
   if (!candidateUrl) return false;
   try {
     const controller = new AbortController();
@@ -51,16 +51,11 @@ async function checkHealth(candidateUrl: string, timeoutMs: number = 3500): Prom
 
 /**
  * Dynamically resolves the fastest, healthy backend tunnel without manual user intervention.
+ * Ignores any stale/dead static build environment variables.
  */
 export async function resolveWorkingBackendUrl(forceRefresh: boolean = false): Promise<string> {
   if (!isRemoteHost()) {
     return 'http://127.0.0.1:8000';
-  }
-
-  // Check explicit environment override first if provided
-  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
-  if (envUrl && envUrl.trim()) {
-    return envUrl.trim().replace(/\/$/, '');
   }
 
   if (currentWorkingUrl && !forceRefresh) {
@@ -73,7 +68,7 @@ export async function resolveWorkingBackendUrl(forceRefresh: boolean = false): P
 
   resolutionPromise = (async () => {
     try {
-      // 1. If we have a cached working URL, verify if it's still alive
+      // 1. If we have a cached working URL in sessionStorage, verify if it's still alive
       const cached =
         typeof window !== 'undefined'
           ? window.sessionStorage?.getItem('chs_working_backend_url')
@@ -84,7 +79,7 @@ export async function resolveWorkingBackendUrl(forceRefresh: boolean = false): P
       }
 
       // 2. Test primary Cloudflare Tunnel
-      if (await checkHealth(DEFAULT_TUNNEL_URL, 3000)) {
+      if (await checkHealth(DEFAULT_TUNNEL_URL, 3500)) {
         currentWorkingUrl = DEFAULT_TUNNEL_URL;
         if (typeof window !== 'undefined') {
           window.sessionStorage?.setItem('chs_working_backend_url', DEFAULT_TUNNEL_URL);
@@ -101,7 +96,7 @@ export async function resolveWorkingBackendUrl(forceRefresh: boolean = false): P
         if (ghRes.ok) {
           const cfg = await ghRes.json();
           if (cfg?.tunnel_url && cfg.tunnel_url !== DEFAULT_TUNNEL_URL) {
-            if (await checkHealth(cfg.tunnel_url, 3000)) {
+            if (await checkHealth(cfg.tunnel_url, 3500)) {
               currentWorkingUrl = cfg.tunnel_url;
               if (typeof window !== 'undefined') {
                 window.sessionStorage?.setItem('chs_working_backend_url', cfg.tunnel_url);
@@ -123,7 +118,7 @@ export async function resolveWorkingBackendUrl(forceRefresh: boolean = false): P
         return FALLBACK_TUNNEL_URL;
       }
 
-      // Default to primary Cloudflare tunnel if all probes timed out
+      // 5. Default to primary Cloudflare tunnel
       currentWorkingUrl = DEFAULT_TUNNEL_URL;
       return DEFAULT_TUNNEL_URL;
     } finally {
@@ -137,10 +132,6 @@ export async function resolveWorkingBackendUrl(forceRefresh: boolean = false): P
 export function getApiBaseUrl(): string {
   if (!isRemoteHost()) {
     return 'http://127.0.0.1:8000';
-  }
-  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
-  if (envUrl && envUrl.trim()) {
-    return envUrl.trim().replace(/\/$/, '');
   }
   return currentWorkingUrl || DEFAULT_TUNNEL_URL;
 }
@@ -206,7 +197,7 @@ export class ApiError extends Error {
 export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
-  timeoutMs: number = 18000
+  timeoutMs: number = 25000
 ): Promise<T> {
   let baseUrl = await resolveWorkingBackendUrl();
   const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
@@ -256,6 +247,11 @@ export async function apiRequest<T>(
       const refreshedBase = await resolveWorkingBackendUrl(true);
       if (refreshedBase && refreshedBase !== baseUrl) {
         baseUrl = refreshedBase;
+        response = await sendRequest(baseUrl);
+      } else if (baseUrl !== FALLBACK_TUNNEL_URL) {
+        // Failover directly to localtunnel fallback
+        baseUrl = FALLBACK_TUNNEL_URL;
+        currentWorkingUrl = FALLBACK_TUNNEL_URL;
         response = await sendRequest(baseUrl);
       } else {
         throw initialErr;
