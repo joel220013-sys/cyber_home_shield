@@ -4,25 +4,24 @@
  * Communicates strictly with the FastAPI Backend (VITE_API_BASE_URL)
  */
 
-export const DEFAULT_TUNNEL_URL = 'https://core-reserved-belle-manitoba.trycloudflare.com';
+export const DEFAULT_TUNNEL_URL = 'https://andrews-luis-sas-dollars.trycloudflare.com';
 
 export function getApiBaseUrl(): string {
-  if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem('chs_backend_url');
-    if (saved && saved.trim()) {
-      return saved.trim().replace(/\/$/, '');
-    }
-  }
-  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
-  if (envUrl && envUrl.trim()) {
-    return envUrl.trim().replace(/\/$/, '');
-  }
-  // When running remotely on Vercel or mobile browser, default to active Cloudflare Tunnel
+  // When running remotely on Vercel or mobile browser, route through Cloudflare Tunnel
   if (
     typeof window !== 'undefined' &&
     window.location.hostname !== 'localhost' &&
     window.location.hostname !== '127.0.0.1'
   ) {
+    // Clear any stale localStorage URLs from past dead sessions
+    const saved = localStorage.getItem('chs_backend_url');
+    if (saved && saved !== DEFAULT_TUNNEL_URL && saved.includes('trycloudflare.com')) {
+      localStorage.removeItem('chs_backend_url');
+    }
+    const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+    if (envUrl && envUrl.trim()) {
+      return envUrl.trim().replace(/\/$/, '');
+    }
     return DEFAULT_TUNNEL_URL;
   }
   return 'http://127.0.0.1:8000';
@@ -162,9 +161,8 @@ export async function apiRequest<T>(
     if (err instanceof ApiError) {
       throw err;
     }
-    const currentBase = getApiBaseUrl();
     throw new ApiError(
-      `Cannot connect to backend (${currentBase}). Please check your Cloudflare Tunnel connection.`,
+      'Unable to connect to the Cyber Home Shield backend. Please verify your Cloudflare Tunnel is running on your PC.',
       0,
       err
     );

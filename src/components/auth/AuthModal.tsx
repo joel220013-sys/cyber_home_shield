@@ -18,7 +18,6 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { isValidIPv4Subnet } from '../../lib/utils';
 import { networkService } from '../../services/networkService';
-import { getApiBaseUrl, setApiBaseUrl } from '../../services/api';
 
 export const AuthModal: React.FC = () => {
   const { authModalOpen, authModalMode, closeAuthModal, openAuthModal, login, register } = useAuth();
@@ -29,31 +28,6 @@ export const AuthModal: React.FC = () => {
   const [subnet, setSubnet] = useState('192.168.1.0/24');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [customBackendUrl, setCustomBackendUrl] = useState(getApiBaseUrl());
-  const [backendSavedMsg, setBackendSavedMsg] = useState<string | null>(null);
-  const [isTestingUrl, setIsTestingUrl] = useState(false);
-
-  const handleSaveBackend = async () => {
-    if (!customBackendUrl.trim()) return;
-    const cleanUrl = customBackendUrl.trim().replace(/\/$/, '');
-    setApiBaseUrl(cleanUrl);
-    setBackendSavedMsg('Saved! Testing connection...');
-    setIsTestingUrl(true);
-    try {
-      const res = await fetch(`${cleanUrl}/api/v1/health`, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) {
-        setBackendSavedMsg('Connected successfully to backend!');
-        setError(null);
-      } else {
-        setBackendSavedMsg(`Warning: Server returned HTTP ${res.status}`);
-      }
-    } catch {
-      setBackendSavedMsg('Saved, but backend appears offline. Check tunnel.');
-    } finally {
-      setIsTestingUrl(false);
-      setTimeout(() => setBackendSavedMsg(null), 4000);
-    }
-  };
 
   useEffect(() => {
     if (authModalOpen && authModalMode === 'register') {
@@ -280,42 +254,6 @@ export const AuthModal: React.FC = () => {
               </button>
             </p>
           )}
-        </div>
-
-        {/* Backend Server Connector (For Phone & Vercel Access) */}
-        <div className="mt-4 pt-3 border-t border-slate-800 text-left">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
-            <span className="flex items-center gap-1.5 font-medium text-slate-300 text-[11px]">
-              <Network className="w-3.5 h-3.5 text-cyan-400" />
-              Backend Server (Cloudflare Tunnel)
-            </span>
-          </div>
-          <div className="flex gap-1.5">
-            <input
-              type="url"
-              value={customBackendUrl}
-              onChange={(e) => setCustomBackendUrl(e.target.value)}
-              placeholder="https://xxx.trycloudflare.com"
-              className="flex-1 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 outline-none"
-            />
-            <button
-              type="button"
-              onClick={handleSaveBackend}
-              disabled={isTestingUrl}
-              className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold transition shrink-0"
-            >
-              {isTestingUrl ? 'Testing...' : 'Save'}
-            </button>
-          </div>
-          {backendSavedMsg && (
-            <p className="text-[11px] text-cyan-300 mt-1.5 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              {backendSavedMsg}
-            </p>
-          )}
-          <p className="text-[10px] text-slate-500 mt-1">
-            Accessing from phone? Enter your active Cloudflare Tunnel URL.
-          </p>
         </div>
       </div>
     </div>
