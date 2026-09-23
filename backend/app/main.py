@@ -70,7 +70,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.DEBUG,
     )
     await _recover_orphaned_scans()
+    if settings.HONEYPOT_ENABLED:
+        try:
+            from app.services.honeypot.manager import honeypot_manager
+            await honeypot_manager.start(
+                custom_bind_host=settings.HONEYPOT_BIND_HOST,
+                allow_non_local=settings.HONEYPOT_ALLOW_NON_LOCAL,
+            )
+            logger.info(
+                "Defensive Honeypot Deception Traps started on %s (HTTP:%s, SSH:%s, CAMERA:%s)",
+                settings.HONEYPOT_BIND_HOST,
+                settings.HONEYPOT_HTTP_PORT,
+                settings.HONEYPOT_SSH_PORT,
+                settings.HONEYPOT_CAMERA_PORT,
+            )
+        except Exception as e:
+            logger.warning("Could not auto-start honeypot subsystem: %s", e)
     yield
+    try:
+        from app.services.honeypot.manager import honeypot_manager
+        if honeypot_manager.is_running:
+            await honeypot_manager.stop()
+    except Exception:
+        pass
     logger.info("Shutting down %s", settings.APP_NAME)
 
 

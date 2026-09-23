@@ -36,20 +36,49 @@ class HoneypotManager:
         self._enabled: bool = settings.HONEYPOT_ENABLED
         self._init_traps()
 
+    def _dispatch_event(self, event: HoneypotTelemetryEvent) -> None:
+        """Asynchronously persist honeypot event to database."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._persist_event(event))
+            else:
+                loop.run_until_complete(self._persist_event(event))
+        except Exception as e:
+            logger.debug(f"Could not dispatch honeypot event: {e}")
+
+    async def _persist_event(self, event: HoneypotTelemetryEvent) -> None:
+        from app.db.session import AsyncSessionLocal
+        from app.services.honeypot.event_logger import log_honeypot_event
+        try:
+            async with AsyncSessionLocal() as db:
+                await log_honeypot_event(db, event)
+                logger.info(
+                    "Intercepted and logged Honeypot interaction: %s from %s on port %s",
+                    event.interaction_type,
+                    event.source_ip,
+                    event.destination_port,
+                )
+        except Exception as e:
+            logger.error("Failed to persist honeypot event: %s", e)
+
     def _init_traps(self) -> None:
         """Initialize trap instances."""
         self._traps = {
             "iot_gateway": HttpIoTGatewayTrap(
                 port=settings.HONEYPOT_HTTP_PORT,
                 bind_host=self.bind_host,
+                on_event_callback=self._dispatch_event,
             ),
             "fake_ssh": SshDecoyTrap(
                 port=settings.HONEYPOT_SSH_PORT,
                 bind_host=self.bind_host,
+                on_event_callback=self._dispatch_event,
             ),
             "camera_rtsp": CameraDecoyTrap(
                 port=settings.HONEYPOT_CAMERA_PORT,
                 bind_host=self.bind_host,
+                on_event_callback=self._dispatch_event,
             ),
         }
 
