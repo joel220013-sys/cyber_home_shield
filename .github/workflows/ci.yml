@@ -27,15 +27,17 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Run Backend Pytest Suite
+        working-directory: backend
         run: |
-          pytest backend/tests/ -v --tb=short
+          pytest tests/ -v --tb=short
         env:
-          ENVIRONMENT: testing
-          DEBUG: true
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
-          HONEYPOT_ENABLED: false
-          HONEYPOT_BIND_HOST: 127.0.0.1
-          HONEYPOT_ALLOW_NON_LOCAL: false
+          PYTHONPATH: .
+          ENVIRONMENT: "testing"
+          DEBUG: "true"
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          HONEYPOT_ENABLED: "false"
+          HONEYPOT_BIND_HOST: "127.0.0.1"
+          HONEYPOT_ALLOW_NON_LOCAL: "false"
 
   frontend-checks:
     name: Frontend Type Check & Production Build
