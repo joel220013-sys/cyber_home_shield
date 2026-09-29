@@ -5,7 +5,7 @@
  * Features auto-failover, Cloudflare Tunnel detection, and zero-config remote sync.
  */
 
-export const DEFAULT_TUNNEL_URL = 'https://digit-leon-narrow-companies.trycloudflare.com';
+export const DEFAULT_TUNNEL_URL = 'https://martin-punk-place-manually.trycloudflare.com';
 export const FALLBACK_TUNNEL_URL = 'https://chs-security-engine.loca.lt';
 export const GITHUB_RAW_CONFIG_URL =
   'https://raw.githubusercontent.com/joel220013-sys/cyber_home_shield/main/active_tunnel.json';
