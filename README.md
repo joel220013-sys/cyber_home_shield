@@ -324,23 +324,15 @@ cd cyber-home-shield
    ```
 
 3. **Configure the Environment File**:
-   Create or verify `backend/.env` (see the [Configuration Reference](#7-configuration-reference-env) section below):
-   ```env
-   APP_NAME="Cyber Home Shield"
-   APP_VERSION="1.0.0"
-   ENVIRONMENT="development"
-   DEBUG=true
+   Copy the provided environment template to initialize your configuration:
+   ```bash
+   # Linux / macOS
+   cp backend/.env.example backend/.env
 
-   DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/cyber_home_shield"
-   SECRET_KEY="your-secure-random-32-character-secret-key-here"
-   NVIDIA_API_KEY="nvapi-your-nvidia-api-key-here"
-   NVIDIA_MODEL="meta/llama-3.2-11b-vision-instruct"
-   ACCESS_TOKEN_EXPIRE_MINUTES=60
-
-   HONEYPOT_ENABLED=false
-   HONEYPOT_BIND_HOST="127.0.0.1"
-   HONEYPOT_ALLOW_NON_LOCAL=false
+   # Windows (PowerShell / CMD)
+   copy backend\.env.example backend\.env
    ```
+   *Note: Sensitive variables (e.g. database credentials, JWT secret keys, and API tokens) remain exclusively in your local `backend/.env` file and are never committed to public repositories.*
 
 4. **Run Database Migrations**:
    ```bash
@@ -491,7 +483,7 @@ Run the included launcher script in PowerShell:
 ```powershell
 & "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://127.0.0.1:8000
 ```
-Cloudflare will assign a public HTTPS endpoint (for example, `https://reasonable-contrast-hopefully-cosmetics.trycloudflare.com`).
+Cloudflare will assign a public HTTPS endpoint (for example, `https://<unique-id>.trycloudflare.com`).
 
 #### Step 3: Access from Any Device (Mobile / Remote Browser)
 1. Open the live Vercel web application:
